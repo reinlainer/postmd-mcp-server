@@ -49,7 +49,7 @@ Cursor는 `command`로 `node`와 `.../src/index.js`를 지정하고, 변수는 *
 ```json
 {
   "mcpServers": {
-    "postmd": {
+    "PostMD": {
       "type": "stdio",
       "command": "node",
       "args": ["/절대경로/postmd-mcp-server/src/index.js"],
@@ -59,7 +59,7 @@ Cursor는 `command`로 `node`와 `.../src/index.js`를 지정하고, 변수는 *
 }
 ```
 
-`envFile` 대신 `env`에 `POSTMD_BASE_URL`, `POSTMD_API_KEY`를 넣어도 된다. 설정 변경 후에는 Cursor를 완전히 종료했다가 다시 열어야 MCP가 다시 로드되는 경우가 많다.
+`mcpServers`의 키(`PostMD`)가 Cursor MCP 목록에 보이는 이름이다. `envFile` 대신 `env`에 `POSTMD_BASE_URL`, `POSTMD_API_KEY`를 넣어도 된다. 설정 변경 후에는 Cursor를 완전히 종료했다가 다시 열어야 MCP가 다시 로드되는 경우가 많다.
 
 ## 검증 스크립트
 
