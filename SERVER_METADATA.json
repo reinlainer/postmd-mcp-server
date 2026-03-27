@@ -1,0 +1,6 @@
+{
+  "name": "postmd-mcp-server",
+  "version": "1.0.0",
+  "description": "PostMD Agent API (/api/agent/v1) over MCP stdio",
+  "instructions": "PostMD Agent API via MCP. MCP-only for PostMD: use postmd_* for all PostMD API actions; do not curl the Agent API. Local .md: read_file is editor work—not PostMD, no separate MCP read server needed. Upload/update: 1) read_file source. 2) ONE postmd_create_document or postmd_update_document with full markdown. No staging JSON, no shell HTTP."
+}
