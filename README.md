@@ -32,12 +32,14 @@ Load order: this repo’s `.env` (if present) is applied via `dotenv` without ov
 | `postmd_get_document` | Metadata by `docCode` (`documents:read`) |
 | `postmd_get_document_raw` | Stored Markdown body (`documents:read`; optional `password`) |
 | `postmd_create_document` | New upload (`documents:write`; body + metadata in one call) |
+| `postmd_create_document_from_file` | Same as create, but `filePath` only—server reads the `.md` locally (large files) |
 | `postmd_update_document` | Update content/metadata (`documents:write`) |
+| `postmd_update_document_from_file` | Same as update with a new body, but `filePath` only—server reads the `.md` locally |
 | `postmd_delete_document` | Logical delete (`documents:write`) |
 | `postmd_create_group` | New group (`groups:write`) |
 | `postmd_update_group` | Update group (`groups:write`) |
 
-For uploads, read the source `.md` in the workspace, then pass the full string into `postmd_create_document` / `postmd_update_document`—no separate staging artifact for PostMD.
+For uploads: either pass the full Markdown as the `markdown` argument (`postmd_create_document` / `postmd_update_document`), or pass a local `filePath` only (`postmd_create_document_from_file` / `postmd_update_document_from_file`) so this server reads the file. The path must exist on the machine running the MCP server.
 
 ## Quickstart
 

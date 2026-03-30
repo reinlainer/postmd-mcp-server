@@ -4,6 +4,8 @@
  * Env: POSTMD_BASE_URL, POSTMD_API_KEY (또는 패키지 루트 `.env`)
  */
 import "./env.js";
+import fs from "node:fs/promises";
+import path from "node:path";
 import process from "node:process";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -48,7 +50,7 @@ function formatNetworkError(err) {
 
 /** MCP initialize → serverInfo.instructions (clients may show to the model). */
 const SERVER_INSTRUCTIONS =
-  "PostMD Agent API via MCP. If the user says MCP-only for PostMD: use `postmd_*` tools for all PostMD HTTP/API actions—do not curl or script the Agent API. Reading a local workspace .md is normal editor work: use read_file (or equivalent)—that is NOT PostMD and does NOT require a separate MCP file-read server; do not waste steps searching other MCPs for read tools. Upload/update workflow: 1) read_file the source .md. 2) ONE call to postmd_create_document or postmd_update_document with full `markdown`. No staging JSON, no shell HTTP.";
+  "PostMD Agent API via MCP. Use `postmd_*` for all PostMD operations; do not call the Agent API with curl or ad-hoc scripts. Create or update a document in one step: either pass the full Markdown body in `markdown` (postmd_create_document / postmd_update_document), or pass `filePath` only so this process reads the file (postmd_create_document_from_file / postmd_update_document_from_file). `filePath` must exist on the machine running this MCP server; prefer an absolute path.";
 
 function debugStderr(line) {
   if (isDebug()) process.stderr.write(`[postmd-mcp-server] ${line}\n`);
@@ -102,6 +104,58 @@ async function agentFetch({ base, key }, path, init = {}) {
   }
 }
 
+/** Read UTF-8 text from a path on the host running this MCP server (not remote HTTP). */
+async function readLocalMarkdownFile(filePath) {
+  const raw = String(filePath ?? "").trim();
+  if (!raw) throw new Error("filePath is required");
+  const resolved = path.resolve(raw);
+  const st = await fs.stat(resolved);
+  if (!st.isFile()) throw new Error(`Not a regular file: ${resolved}`);
+  const buf = await fs.readFile(resolved);
+  return {
+    text: buf.toString("utf8"),
+    suggestedName: path.basename(resolved),
+  };
+}
+
+async function sendDocumentCreate(ctx, a, markdown) {
+  const form = new FormData();
+  const fn = a.fileName || "document.md";
+  const blob = new Blob([String(markdown)], { type: "text/markdown" });
+  form.append("file", blob, fn);
+  form.append("title", String(a.title));
+  if (a.password != null) form.append("password", String(a.password));
+  if (a.shareEndDate != null) form.append("shareEndDate", String(a.shareEndDate));
+  if (a.viewerStyle != null) form.append("viewerStyle", String(a.viewerStyle));
+  if (a.groupId != null) form.append("groupId", String(a.groupId));
+  const r = await agentFetch(ctx, "/documents", {
+    method: "POST",
+    body: form,
+  });
+  if (r.networkError) return textErr(`Request failed: ${r.networkError}`);
+  if (!r.json) return textErr(`HTTP ${r.status}: ${r.bodyText}`);
+  return textOk(JSON.stringify(r.json, null, 2));
+}
+
+async function sendDocumentUpdate(ctx, a, markdown) {
+  const form = new FormData();
+  form.append("title", String(a.title));
+  if (a.password != null) form.append("password", String(a.password));
+  if (a.shareEndDate != null) form.append("shareEndDate", String(a.shareEndDate));
+  if (a.viewerStyle != null) form.append("viewerStyle", String(a.viewerStyle));
+  if (markdown != null) {
+    const blob = new Blob([String(markdown)], { type: "text/markdown" });
+    form.append("file", blob, a.fileName || "document.md");
+  }
+  const r = await agentFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/update`, {
+    method: "POST",
+    body: form,
+  });
+  if (r.networkError) return textErr(`Request failed: ${r.networkError}`);
+  if (!r.json) return textErr(`HTTP ${r.status}: ${r.bodyText}`);
+  return textOk(JSON.stringify(r.json, null, 2));
+}
+
 const TOOL_DEFS = [
   {
     name: "postmd_list_groups",
@@ -148,7 +202,7 @@ const TOOL_DEFS = [
   {
     name: "postmd_create_document",
     description:
-      "Upload a new document to PostMD. Scope: documents:write. MCP-only for PostMD means THIS tool for the upload—not curl. Local file: use the editor read_file; no need for another MCP server to read files. WORKFLOW: 1) read_file (or equivalent) the source. 2) Call THIS tool once with title and markdown = that content. DONE. No temp JSON staging, no separate PostMD HTTP.",
+      "Create a new PostMD document (multipart upload to the Agent API). Scope: documents:write. Required: title, markdown.",
     inputSchema: {
       type: "object",
       properties: {
@@ -156,7 +210,7 @@ const TOOL_DEFS = [
         markdown: {
           type: "string",
           description:
-            "FULL document body as UTF-8 in one string, one call. No separate staging file required—put the complete Markdown here.",
+            "Full Markdown document as one UTF-8 string (entire source, not a summary).",
         },
         fileName: { type: "string", default: "document.md" },
         password: { type: "string" },
@@ -168,9 +222,35 @@ const TOOL_DEFS = [
     },
   },
   {
+    name: "postmd_create_document_from_file",
+    description:
+      "Create a new PostMD document; this process reads the Markdown from `filePath` on the local filesystem (same API as postmd_create_document). Scope: documents:write. Required: filePath, title.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        filePath: {
+          type: "string",
+          description:
+            "Path to the file on the MCP server host; read as UTF-8. Prefer an absolute path.",
+        },
+        title: { type: "string" },
+        fileName: {
+          type: "string",
+          description:
+            "Multipart filename for the upload; defaults to the basename of filePath.",
+        },
+        password: { type: "string" },
+        shareEndDate: { type: "string" },
+        viewerStyle: { type: "string" },
+        groupId: { type: "number" },
+      },
+      required: ["filePath", "title"],
+    },
+  },
+  {
     name: "postmd_update_document",
     description:
-      "Replace/update a PostMD document. Scope: documents:write. MCP-only for PostMD means THIS tool for the update—not curl. Local file: use the editor read_file; no need for another MCP server to read files. WORKFLOW: 1) read_file (or equivalent) the source. 2) Call THIS tool once with docCode, title, markdown = that content. DONE. No temp JSON staging, no separate PostMD HTTP.",
+      "Update a PostMD document (metadata and/or file body). Scope: documents:write. Required: docCode, title. Include markdown to replace the stored Markdown; omit markdown to change metadata only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -182,11 +262,37 @@ const TOOL_DEFS = [
         markdown: {
           type: "string",
           description:
-            "FULL new file body as UTF-8 in one string, one call when updating content. Omit only if you change metadata without touching the file body.",
+            "Full new Markdown body as one UTF-8 string when replacing content. Omit if only metadata changes.",
         },
         fileName: { type: "string", default: "document.md" },
       },
       required: ["docCode", "title"],
+    },
+  },
+  {
+    name: "postmd_update_document_from_file",
+    description:
+      "Update a PostMD document’s Markdown from a local file; this process reads `filePath` (same API as postmd_update_document with a new body). Scope: documents:write. Required: filePath, docCode, title.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        filePath: {
+          type: "string",
+          description:
+            "Path to the file on the MCP server host; read as UTF-8. Prefer an absolute path.",
+        },
+        docCode: { type: "string" },
+        title: { type: "string" },
+        fileName: {
+          type: "string",
+          description:
+            "Multipart filename for the upload; defaults to the basename of filePath.",
+        },
+        password: { type: "string" },
+        shareEndDate: { type: "string" },
+        viewerStyle: { type: "string" },
+      },
+      required: ["filePath", "docCode", "title"],
     },
   },
   {
@@ -270,42 +376,32 @@ async function runTool(ctx, name, args) {
       }
     }
     case "postmd_create_document": {
-      const form = new FormData();
-      const fn = a.fileName || "document.md";
-      const blob = new Blob([String(a.markdown)], { type: "text/markdown" });
-      form.append("file", blob, fn);
-      form.append("title", String(a.title));
-      if (a.password != null) form.append("password", String(a.password));
-      if (a.shareEndDate != null) form.append("shareEndDate", String(a.shareEndDate));
-      if (a.viewerStyle != null) form.append("viewerStyle", String(a.viewerStyle));
-      if (a.groupId != null) form.append("groupId", String(a.groupId));
-      const r = await agentFetch(ctx, "/documents", {
-        method: "POST",
-        body: form,
-      });
-      if (r.networkError)
-        return textErr(`Request failed: ${r.networkError}`);
-      if (!r.json) return textErr(`HTTP ${r.status}: ${r.bodyText}`);
-      return textOk(JSON.stringify(r.json, null, 2));
+      return await sendDocumentCreate(ctx, a, a.markdown);
+    }
+    case "postmd_create_document_from_file": {
+      try {
+        const { filePath, ...rest } = a;
+        const { text, suggestedName } = await readLocalMarkdownFile(filePath);
+        const payload = { ...rest, fileName: rest.fileName ?? suggestedName };
+        return await sendDocumentCreate(ctx, payload, text);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return textErr(msg);
+      }
     }
     case "postmd_update_document": {
-      const form = new FormData();
-      form.append("title", String(a.title));
-      if (a.password != null) form.append("password", String(a.password));
-      if (a.shareEndDate != null) form.append("shareEndDate", String(a.shareEndDate));
-      if (a.viewerStyle != null) form.append("viewerStyle", String(a.viewerStyle));
-      if (a.markdown != null) {
-        const blob = new Blob([String(a.markdown)], { type: "text/markdown" });
-        form.append("file", blob, a.fileName || "document.md");
+      return await sendDocumentUpdate(ctx, a, a.markdown);
+    }
+    case "postmd_update_document_from_file": {
+      try {
+        const { filePath, ...rest } = a;
+        const { text, suggestedName } = await readLocalMarkdownFile(filePath);
+        const payload = { ...rest, fileName: rest.fileName ?? suggestedName };
+        return await sendDocumentUpdate(ctx, payload, text);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return textErr(msg);
       }
-      const r = await agentFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/update`, {
-        method: "POST",
-        body: form,
-      });
-      if (r.networkError)
-        return textErr(`Request failed: ${r.networkError}`);
-      if (!r.json) return textErr(`HTTP ${r.status}: ${r.bodyText}`);
-      return textOk(JSON.stringify(r.json, null, 2));
     }
     case "postmd_delete_document": {
       const r = await agentFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/delete`, {
