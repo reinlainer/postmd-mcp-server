@@ -2,6 +2,8 @@
 
 PostMD Agent API (`/api/agent/v1`)를 MCP(stdio)로 노출하는 서버.
 
+**위치:** PostMD 모노레포의 `packages/postmd-mcp-server/`.
+
 - **런타임:** Node.js 20 LTS (package.json `engines` 참고)
 - **의존성:** `@modelcontextprotocol/sdk` 1.0.4 (고정)
 
@@ -14,12 +16,13 @@ PostMD Agent API (`/api/agent/v1`)를 MCP(stdio)로 노출하는 서버.
 
 **설정 방법 (둘 중 하나 또는 병행)**
 
-1. **`.env` 파일** — 저장소 루트에 `.env.example`을 복사해 `.env`로 두고 값을 채운다. `src/env.js`가 기동 시 로드한다(이미 셸·Cursor `env`에 있는 값은 덮어쓰지 않음).
+1. **`.env` 파일** — 이 패키지 디렉터리에 `.env.example`을 복사해 `.env`로 두고 값을 채운다. `src/env.js`가 기동 시 로드한다(이미 셸·Cursor `env`에 있는 값은 덮어쓰지 않음).
 2. **셸 / Cursor `mcp.json`의 `env`** — export 또는 MCP 설정으로 넣는다.
 
 ## 실행
 
 ```bash
+cd packages/postmd-mcp-server
 cp .env.example .env
 # .env 편집 후
 node src/index.js
@@ -28,12 +31,13 @@ node src/index.js
 또는:
 
 ```bash
+cd packages/postmd-mcp-server
 export POSTMD_BASE_URL=http://localhost:8080
 export POSTMD_API_KEY=pmk_...
 node src/index.js
 ```
 
-Cursor는 `command`로 `node`와 `.../src/index.js`를 지정하고, 변수는 **`.env` 또는 `mcp.json`의 `env`** 중 편한 쪽을 쓰면 된다.
+Cursor는 `command`로 `node`와 `.../packages/postmd-mcp-server/src/index.js`를 지정하고, 변수는 **`.env` 또는 `mcp.json`의 `env`** 중 편한 쪽을 쓰면 된다.
 
 ### Cursor MCP 설정 위치
 
@@ -42,7 +46,7 @@ Cursor는 `command`로 `node`와 `.../src/index.js`를 지정하고, 변수는 *
 | **`~/.cursor/mcp.json`** (전역) | 이 PC에서 여러 워크스페이스에 동일한 MCP를 쓸 때. **로컬 개발 시 권장.** |
 | **프로젝트의 `.cursor/mcp.json`** | 그 레포만 다른 설정이 필요할 때. 전역과 **병합**되며, 같은 서버 이름이면 **프로젝트 쪽이 우선**. |
 
-여러 프로젝트에서 PostMD MCP를 쓰려면 서버 소스는 한 곳에 두고, **`args`와 `envFile`에 이 저장소의 절대 경로**를 넣은 전역 설정 한 번만 두는 편이 경로 깨짐·설정 중복이 적다.
+이 레포를 워크스페이스로 열었다면 **`args`와 `envFile`에 `packages/postmd-mcp-server`의 절대 경로**를 넣으면 된다.
 
 전역 예시(`~/.cursor/mcp.json`):
 
@@ -52,8 +56,8 @@ Cursor는 `command`로 `node`와 `.../src/index.js`를 지정하고, 변수는 *
     "PostMD": {
       "type": "stdio",
       "command": "node",
-      "args": ["/절대경로/postmd-mcp-server/src/index.js"],
-      "envFile": "/절대경로/postmd-mcp-server/.env"
+      "args": ["/절대경로/postmd/packages/postmd-mcp-server/src/index.js"],
+      "envFile": "/절대경로/postmd/packages/postmd-mcp-server/.env"
     }
   }
 }
@@ -66,6 +70,7 @@ Cursor는 `command`로 `node`와 `.../src/index.js`를 지정하고, 변수는 *
 PostMD가 떠 있는 상태에서:
 
 ```bash
+cd packages/postmd-mcp-server
 export POSTMD_BASE_URL=...
 export POSTMD_API_KEY=...
 npm run smoke

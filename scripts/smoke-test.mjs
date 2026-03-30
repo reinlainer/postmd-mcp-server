@@ -1,6 +1,6 @@
 /**
- * PostMD가 떠 있고, POSTMD_BASE_URL · POSTMD_API_KEY 가
- * 환경 또는 프로젝트 루트 .env 에 있는 상태에서 실행.
+ * PostMD가 떠 있고, POSTMD_BASE_URL · POSTMD_API_KEY가
+ * 환경 또는 패키지 루트 `.env`에 있는 상태에서 실행.
  */
 import "../src/env.js";
 import process from "node:process";

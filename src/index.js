@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * PostMD Agent API — MCP stdio server
- * Env: POSTMD_BASE_URL, POSTMD_API_KEY (또는 프로젝트 루트 .env)
+ * Env: POSTMD_BASE_URL, POSTMD_API_KEY (또는 패키지 루트 `.env`)
  */
 import "./env.js";
 import process from "node:process";
