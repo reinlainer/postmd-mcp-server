@@ -1,59 +1,81 @@
 # PostMD MCP Server
 
-stdio [Model Context Protocol](https://modelcontextprotocol.io) server for **[PostMD](https://postmd.turink.com)**—hosted Markdown you publish once and share by link, with optional groups, document/group passwords, and share expiry. This server wraps PostMD’s **Agent API** (`/api/agent/v1`) so assistants can list, read, create, and update your documents using scoped API keys instead of raw HTTP.
+stdio [Model Context Protocol](https://modelcontextprotocol.io) server for **[PostMD](https://postmd.turink.com)** — publish a Markdown document, get a web page you share by link. Optional groups, document passwords, share expiry and viewer themes. This server wraps PostMD's public API (`/api/v1`) so assistants can publish, read, update and organize documents.
 
-**HTTP reference:** [postmd.turink.com/docs/api-reference.md](https://postmd.turink.com/docs/api-reference.md)
+**Publishing needs no account and no key.** With zero configuration this server can already turn Markdown into a shareable page. An API key adds management: updating and deleting your documents, attachments, and groups.
+
+**HTTP reference:** [postmd.turink.com/docs/api](https://postmd.turink.com/docs/api) · machine-readable spec at [/api-docs](https://postmd.turink.com/api-docs)
 
 ## Requirements
 
-- **Node.js** 20.x (see `package.json` → `engines`)
-- PostMD account and an **API key** (`pmk_…`) with the scopes your tools need
+- **Node.js** 20 or later
+- Nothing else. An **API key** (`pmk_…`) only for the management tools.
 
-## Authentication
+## Configuration
 
-1. Sign in at [postmd.turink.com](https://postmd.turink.com).
-2. Open **[Account → API keys](https://postmd.turink.com/account)** and create a key. Pick scopes to match read vs write (they are independent; a `403` usually means a missing scope).
-3. Set credentials in the environment (see below). Do **not** commit `.env` or keys.
+All variables are optional.
 
 | Variable | Description |
 |----------|-------------|
-| `POSTMD_BASE_URL` | Origin only, no trailing slash. Production: `https://postmd.turink.com`. Self‑hosted / local: your base URL (e.g. `http://localhost:8080`). |
-| `POSTMD_API_KEY` | `pmk_…` from Account. |
-| `POSTMD_DEBUG` | Optional. `1` / `true` / `yes` → extra stderr logging. |
+| `POSTMD_BASE_URL` | Defaults to `https://postmd.turink.com`. Set for a self-hosted / local instance. Origin only, no trailing slash. |
+| `POSTMD_API_KEY` | `pmk_…` for the tools marked with a scope below. Sign in at [postmd.turink.com](https://postmd.turink.com), open **Account → API keys**, pick the scopes you need — read and write are independent, and a `403` usually means a missing scope. |
+| `POSTMD_DEBUG` | `1` / `true` / `yes` → extra stderr logging. |
 
-Load order: this repo’s `.env` (if present) is applied via `dotenv` without overwriting variables already set by the host (e.g. MCP `env`).
+Load order: this repo's `.env` (if present) is applied via `dotenv` without overwriting variables already set by the host (e.g. MCP `env`). Do **not** commit `.env` or keys.
 
 ## Tools
 
+Publishing and reading — no key needed:
+
 | Tool | Purpose |
 |------|---------|
-| `postmd_list_groups` | Groups visible to the key (`groups:read`) |
-| `postmd_list_group_documents` | Documents in a group (`groups:read`, `documents:read`) |
-| `postmd_get_document` | Metadata by `docCode` (`documents:read`) |
-| `postmd_get_document_raw` | Stored Markdown body (`documents:read`; optional `password`) |
-| `postmd_create_document` | New upload (`documents:write`; body + metadata in one call) |
-| `postmd_create_document_from_file` | Same as create, but `filePath` only—server reads the `.md` locally (large files) |
-| `postmd_update_document` | Update content/metadata (`documents:write`) |
-| `postmd_update_document_from_file` | Same as update with a new body, but `filePath` only—server reads the `.md` locally |
-| `postmd_delete_document` | Logical delete (`documents:write`) |
-| `postmd_create_group` | New group (`groups:write`) |
-| `postmd_update_group` | Update group (`groups:write`) |
+| `postmd_create_document` | Publish Markdown, get `docCode` + share URL |
+| `postmd_create_document_from_file` | Same, but this server reads a local `filePath` (large files) |
+| `postmd_get_document` | Metadata by `docCode` |
+| `postmd_get_document_raw` | Stored Markdown body (optional `password`) |
 
-For uploads: either pass the full Markdown as the `markdown` argument (`postmd_create_document` / `postmd_update_document`), or pass a local `filePath` only (`postmd_create_document_from_file` / `postmd_update_document_from_file`) so this server reads the file. The path must exist on the machine running the MCP server.
+Managing documents — key with `documents:write`:
+
+| Tool | Purpose |
+|------|---------|
+| `postmd_update_document` | Replace content and/or metadata; can clear password / end date |
+| `postmd_update_document_from_file` | Same, body read from a local `filePath` |
+| `postmd_delete_document` | Delete (recoverable for 30 days) |
+| `postmd_upload_attachment` | Upload an image/PDF, get a URL to embed in Markdown |
+| `postmd_create_documents_from_files` | Bulk-publish several `.md` files in one call |
+| `postmd_add_document_to_group` | File a document into a group / folder |
+| `postmd_remove_document_from_group` | Take it out again |
+
+Groups — key with `groups:read` / `groups:write`:
+
+| Tool | Purpose |
+|------|---------|
+| `postmd_list_groups` | Groups visible to the key (paged) |
+| `postmd_list_group_documents` | Documents in a group (paged, searchable, sortable) |
+| `postmd_create_group` | New group |
+| `postmd_update_group` | Rename / change expiry |
+| `postmd_delete_group` | Delete a group (documents survive) |
+
+For uploads: either pass the full Markdown as the `markdown` argument, or pass a local `filePath` only so this server reads the file. The path must exist on the machine running the MCP server.
 
 ## Quickstart
 
 ```bash
 git clone https://github.com/reinlainer/postmd-mcp-server.git
 cd postmd-mcp-server
-cp .env.example .env   # set POSTMD_BASE_URL and POSTMD_API_KEY
 npm ci
 node src/index.js      # normally spawned by the MCP client; use for debugging
 ```
 
-## Cursor (`~/.cursor/mcp.json`)
+## Client configuration
 
-Restart the IDE after edits.
+Claude Code:
+
+```bash
+claude mcp add postmd -- node /absolute/path/to/postmd-mcp-server/src/index.js
+```
+
+Cursor (`~/.cursor/mcp.json`) and most other stdio clients:
 
 ```json
 {
@@ -62,30 +84,25 @@ Restart the IDE after edits.
       "type": "stdio",
       "command": "node",
       "args": ["/absolute/path/to/postmd-mcp-server/src/index.js"],
-      "envFile": "/absolute/path/to/postmd-mcp-server/.env"
+      "env": { "POSTMD_API_KEY": "pmk_…" }
     }
   }
 }
 ```
 
-Use `"env": { "POSTMD_BASE_URL": "…", "POSTMD_API_KEY": "…" }` instead of `envFile` if you prefer.
+Leave `env` out entirely for publish/read-only use. `cp .env.example .env` works too — the server loads its own `.env`.
 
 ## Smoke test
 
-PostMD must be reachable. From this directory:
+Runs the full write path against a live server and cleans up after itself. Needs a key with all four scopes.
 
 ```bash
-export POSTMD_BASE_URL=https://postmd.turink.com
 export POSTMD_API_KEY=pmk_…
 npm run smoke
 ```
 
-Creates a passworded group and document, reads raw Markdown, deletes the document. Groups are not deleted via Agent API—remove in the UI if needed.
-
-## Maintainers
-
-When developed inside the private PostMD monorepo, this package lives at `packages/postmd-mcp-server/`. Publish to GitHub with that repo’s `scripts/sync-mcp-github.sh`.
+Creates a group and a passworded document, reads it back, updates it, clears the password, then deletes both.
 
 ## Stack
 
-`@modelcontextprotocol/sdk` **1.0.4** (pinned). **License:** MIT.
+`@modelcontextprotocol/sdk` **1.30.0**, `dotenv`. **License:** MIT.

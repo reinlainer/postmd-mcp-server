@@ -1,6 +1,6 @@
 {
   "name": "postmd-mcp-server",
-  "version": "1.0.0",
-  "description": "PostMD Agent API (/api/agent/v1) over MCP stdio",
-  "instructions": "PostMD Agent API via MCP. Use postmd_* for PostMD; do not curl the Agent API. Create/update: either pass full Markdown in markdown (postmd_create_document / postmd_update_document) or pass filePath only (postmd_create_document_from_file / postmd_update_document_from_file) so this server reads the file. Paths must exist on the MCP server host."
+  "version": "2.0.0",
+  "description": "PostMD public API (/api/v1) over MCP stdio — publish Markdown, get a share link",
+  "instructions": "PostMD publishes Markdown as web pages. Use the postmd_* tools instead of calling the HTTP API directly. Creating a document needs no API key; updating, deleting, attachments and groups need POSTMD_API_KEY with the matching scope. Pass the full Markdown in `markdown`, or pass a local `filePath` so this server reads the file itself. A successful create returns data.shareUrl — hand that URL to people."
 }

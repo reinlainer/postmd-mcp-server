@@ -1,7 +1,7 @@
 {
   "name": "postmd-mcp-server",
-  "version": "1.0.0",
-  "description": "MCP server for PostMD Agent API",
+  "version": "2.0.0",
+  "description": "MCP server for PostMD — publish Markdown, get a shareable web page",
   "type": "module",
   "main": "src/index.js",
   "bin": {
@@ -12,15 +12,22 @@
     "smoke": "node scripts/smoke-test.mjs"
   },
   "engines": {
-    "node": ">=20.12.0 <21"
+    "node": ">=20"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/reinlainer/postmd-mcp-server.git"
+  },
+  "homepage": "https://postmd.turink.com",
   "keywords": [
     "mcp",
-    "postmd"
+    "postmd",
+    "markdown",
+    "publishing"
   ],
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.0.4",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "dotenv": "16.4.5"
   }
 }
