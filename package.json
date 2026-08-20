@@ -2,6 +2,7 @@
   "name": "postmd-mcp-server",
   "version": "2.0.0",
   "description": "MCP server for PostMD — publish Markdown, get a shareable web page",
+  "mcpName": "io.github.reinlainer/postmd-mcp-server",
   "type": "module",
   "main": "src/index.js",
   "bin": {

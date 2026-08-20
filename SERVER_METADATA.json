@@ -1,6 +1,0 @@
-{
-  "name": "postmd-mcp-server",
-  "version": "2.0.0",
-  "description": "PostMD public API (/api/v1) over MCP stdio — publish Markdown, get a share link",
-  "instructions": "PostMD publishes Markdown as web pages. Use the postmd_* tools instead of calling the HTTP API directly. Creating a document needs no API key; updating, deleting, attachments and groups need POSTMD_API_KEY with the matching scope. Pass the full Markdown in `markdown`, or pass a local `filePath` so this server reads the file itself. A successful create returns data.shareUrl — hand that URL to people."
-}

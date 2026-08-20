@@ -1,0 +1,40 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.reinlainer/postmd-mcp-server",
+  "description": "Publish Markdown to PostMD and get a shareable web page",
+  "version": "2.0.0",
+  "repository": {
+    "url": "https://github.com/reinlainer/postmd-mcp-server",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "postmd-mcp-server",
+      "version": "2.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "POSTMD_BASE_URL",
+          "description": "Where PostMD runs. Defaults to https://postmd.turink.com; set it only for a self-hosted instance.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "POSTMD_API_KEY",
+          "description": "Needed only for managing documents, attachments and groups. Publishing and reading work without it.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "POSTMD_DEBUG",
+          "description": "Set to 1 for verbose diagnostics on stderr.",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}
