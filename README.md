@@ -43,8 +43,7 @@ Managing documents — key with `documents:write`:
 | `postmd_delete_document` | Delete (recoverable for 30 days) |
 | `postmd_upload_attachment` | Upload an image/PDF, get a URL to embed in Markdown |
 | `postmd_create_documents_from_files` | Bulk-publish several `.md` files in one call |
-| `postmd_add_document_to_group` | File a document into a group / folder |
-| `postmd_remove_document_from_group` | Take it out again |
+| `postmd_move_document_to_group` | Move a document into a group / folder |
 
 Groups — key with `groups:read` / `groups:write`:
 

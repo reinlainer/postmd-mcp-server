@@ -438,9 +438,10 @@ const TOOL_DEFS = [
     },
   },
   {
-    name: "postmd_add_document_to_group",
+    name: "postmd_move_document_to_group",
     description:
-      "Place a document you own into a group you can use, optionally into a folder. " +
+      "Move a document you own into a group you can use, optionally into a folder of that " +
+      "group. A document belongs to exactly one group, so this replaces its current group. " +
       "Requires an API key with documents:write.",
     inputSchema: {
       type: "object",
@@ -448,18 +449,6 @@ const TOOL_DEFS = [
         docCode: { type: "string" },
         groupId: { type: "number" },
         folderId: { type: "number", description: "File it into this folder of that group." },
-      },
-      required: ["docCode", "groupId"],
-    },
-  },
-  {
-    name: "postmd_remove_document_from_group",
-    description: "Take a document out of a group. Requires an API key with documents:write.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        docCode: { type: "string" },
-        groupId: { type: "number" },
       },
       required: ["docCode", "groupId"],
     },
@@ -629,26 +618,16 @@ async function runTool(ctx, name, args) {
       const r = await apiFetch(ctx, `/groups/${Number(a.groupId)}/documents${qs}`);
       return fromEnvelope(r);
     }
-    case "postmd_add_document_to_group": {
+    case "postmd_move_document_to_group": {
       const denied = missingKey(ctx, "documents:write");
       if (denied) return denied;
       const body = { groupId: a.groupId };
       if (a.folderId != null) body.folderId = a.folderId;
-      const r = await apiFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/groups`, {
+      const r = await apiFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/group`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      return fromEnvelope(r);
-    }
-    case "postmd_remove_document_from_group": {
-      const denied = missingKey(ctx, "documents:write");
-      if (denied) return denied;
-      const r = await apiFetch(
-        ctx,
-        `/documents/${encodeURIComponent(a.docCode)}/groups/${Number(a.groupId)}/remove`,
-        { method: "POST" }
-      );
       return fromEnvelope(r);
     }
     case "postmd_create_group": {
