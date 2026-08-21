@@ -238,8 +238,8 @@ const TOOL_DEFS = [
     description:
       "Publish Markdown as a PostMD web page. No API key required — anyone can publish. " +
       "Returns docCode and data.shareUrl; hand shareUrl to people. With an API key the " +
-      "document belongs to that member and can be updated later; groupId additionally " +
-      "files it into that group (key with documents:write).",
+      "document belongs to that member and can be updated later; groupId files it into " +
+      "that group instead of the default one (key with documents:write).",
     inputSchema: {
       type: "object",
       properties: {
@@ -253,7 +253,7 @@ const TOOL_DEFS = [
         },
         fileName: { type: "string", description: "Upload filename, must end in .md. Default document.md." },
         ...DOC_META_PROPS,
-        groupId: { type: "number", description: "Also place the document in this group (needs an API key)." },
+        groupId: { type: "number", description: "File the document in this group instead of the default group (needs an API key)." },
       },
       required: ["markdown"],
     },
@@ -273,7 +273,7 @@ const TOOL_DEFS = [
         title: { type: "string", description: "Defaults to the file name without .md." },
         fileName: { type: "string", description: "Upload filename. Defaults to the basename of filePath." },
         ...DOC_META_PROPS,
-        groupId: { type: "number", description: "Also place the document in this group (needs an API key)." },
+        groupId: { type: "number", description: "File the document in this group instead of the default group (needs an API key)." },
       },
       required: ["filePath"],
     },
@@ -293,7 +293,7 @@ const TOOL_DEFS = [
           description: "Paths to .md files on the MCP server host. Each becomes its own document.",
         },
         ...DOC_META_PROPS,
-        groupId: { type: "number", description: "Place every document in this group as well." },
+        groupId: { type: "number", description: "File every document in this group instead of the default group." },
       },
       required: ["filePaths"],
     },
