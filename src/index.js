@@ -17,7 +17,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
-const VERSION = "2.0.0";
+const VERSION = "2.1.0";
 
 /** 기본은 운영이다. 대부분의 사용자는 설정 없이 바로 쓰면 된다. */
 const DEFAULT_BASE_URL = "https://postmd.turink.com";
@@ -402,6 +402,101 @@ const TOOL_DEFS = [
     },
   },
   {
+    name: "postmd_list_notes",
+    description:
+      "List notes and highlights on a document: your own plus every SHARED one, newest " +
+      "first. Requires an API key with documents:read. Each note carries mine and " +
+      "manageable flags — trust them instead of re-deriving permissions. Pass `password` " +
+      "for a password-protected document.",
+    annotations: { readOnlyHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        docCode: { type: "string" },
+        password: { type: "string", description: "Plain document password, if the document has one." },
+      },
+      required: ["docCode"],
+    },
+  },
+  {
+    name: "postmd_add_note",
+    description:
+      "Attach a note or highlight to a document. Requires an API key with documents:write. " +
+      "Give `content` for a note, `color` alone for a colour-only highlight (then " +
+      "`quotedContent` is required — a highlight must point at a passage). scope PRIVATE " +
+      "(default) is visible only to the key's member; SHARED is visible to every reader " +
+      "and only allowed on documents owned by a person.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        docCode: { type: "string" },
+        content: { type: "string", description: "Note text, up to 4000 characters. Omit for a colour-only highlight." },
+        quotedContent: {
+          type: "string",
+          description: "Passage of the body this note points to, up to 4000 characters. Matched by text, so it survives edits elsewhere.",
+        },
+        scope: { type: "string", description: "PRIVATE (default) or SHARED." },
+        color: { type: "string", description: "YELLOW, GREEN, BLUE or PURPLE." },
+        textStart: { type: "number", description: "Character offset where the quote starts in the body. Optional; speeds up re-anchoring." },
+        password: { type: "string", description: "Plain document password, if the document has one." },
+      },
+      required: ["docCode"],
+    },
+  },
+  {
+    name: "postmd_update_note",
+    description:
+      "Edit a note you wrote. Requires an API key with documents:write. Omitting scope " +
+      "keeps the current one. The note must keep text or a colour.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        docCode: { type: "string" },
+        noteId: { type: "number" },
+        content: { type: "string" },
+        quotedContent: { type: "string" },
+        scope: { type: "string", description: "PRIVATE or SHARED. Omit to keep the current scope." },
+        color: { type: "string", description: "YELLOW, GREEN, BLUE or PURPLE." },
+      },
+      required: ["docCode", "noteId"],
+    },
+  },
+  {
+    name: "postmd_resolve_note",
+    description:
+      "Mark a note as settled, or undo it with resolved=false. Meaningful on SHARED " +
+      "notes; the author or the document owner may set it. Requires an API key with " +
+      "documents:write.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        docCode: { type: "string" },
+        noteId: { type: "number" },
+        resolved: { type: "boolean", description: "true marks it settled; false reopens it." },
+      },
+      required: ["docCode", "noteId", "resolved"],
+    },
+  },
+  {
+    name: "postmd_delete_note",
+    description:
+      "Delete a note: your own, or a SHARED note on a document you own. Requires an API " +
+      "key with documents:write.",
+    inputSchema: {
+      type: "object",
+      properties: { docCode: { type: "string" }, noteId: { type: "number" } },
+      required: ["docCode", "noteId"],
+    },
+  },
+  {
+    name: "postmd_list_my_notes",
+    description:
+      "List every note the key's member wrote, across all documents, with docCode and " +
+      "documentTitle beside each one. Requires an API key with documents:read.",
+    annotations: { readOnlyHint: true },
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
     name: "postmd_list_groups",
     description: "List groups the key's member belongs to. Requires an API key with groups:read. Paged.",
     annotations: { readOnlyHint: true },
@@ -597,6 +692,77 @@ async function runTool(ctx, name, args) {
       } catch (e) {
         return textErr(e instanceof Error ? e.message : String(e));
       }
+    }
+    case "postmd_list_notes": {
+      const denied = missingKey(ctx, "documents:read");
+      if (denied) return denied;
+      const headers = {};
+      if (a.password) headers["X-Document-Password"] = String(a.password);
+      const r = await apiFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/notes`, { headers });
+      return fromEnvelope(r);
+    }
+    case "postmd_add_note": {
+      const denied = missingKey(ctx, "documents:write");
+      if (denied) return denied;
+      const body = {};
+      if (a.content != null) body.content = String(a.content);
+      if (a.quotedContent != null) body.quotedContent = String(a.quotedContent);
+      if (a.scope != null) body.scope = String(a.scope);
+      if (a.color != null) body.color = String(a.color);
+      if (a.textStart != null) body.textStart = Number(a.textStart);
+      const headers = { "Content-Type": "application/json" };
+      if (a.password) headers["X-Document-Password"] = String(a.password);
+      const r = await apiFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/notes`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+      return fromEnvelope(r);
+    }
+    case "postmd_update_note": {
+      const denied = missingKey(ctx, "documents:write");
+      if (denied) return denied;
+      const body = {};
+      if (a.content != null) body.content = String(a.content);
+      if (a.quotedContent != null) body.quotedContent = String(a.quotedContent);
+      if (a.scope != null) body.scope = String(a.scope);
+      if (a.color != null) body.color = String(a.color);
+      const r = await apiFetch(
+        ctx,
+        `/documents/${encodeURIComponent(a.docCode)}/notes/${Number(a.noteId)}/update`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+      );
+      return fromEnvelope(r);
+    }
+    case "postmd_resolve_note": {
+      const denied = missingKey(ctx, "documents:write");
+      if (denied) return denied;
+      const r = await apiFetch(
+        ctx,
+        `/documents/${encodeURIComponent(a.docCode)}/notes/${Number(a.noteId)}/resolve`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ resolved: a.resolved === true }),
+        }
+      );
+      return fromEnvelope(r);
+    }
+    case "postmd_delete_note": {
+      const denied = missingKey(ctx, "documents:write");
+      if (denied) return denied;
+      const r = await apiFetch(
+        ctx,
+        `/documents/${encodeURIComponent(a.docCode)}/notes/${Number(a.noteId)}/delete`,
+        { method: "POST" }
+      );
+      return fromEnvelope(r);
+    }
+    case "postmd_list_my_notes": {
+      const denied = missingKey(ctx, "documents:read");
+      if (denied) return denied;
+      const r = await apiFetch(ctx, "/notes");
+      return fromEnvelope(r);
     }
     case "postmd_list_groups": {
       const denied = missingKey(ctx, "groups:read");

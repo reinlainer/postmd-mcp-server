@@ -45,6 +45,20 @@ Managing documents — key with `documents:write`:
 | `postmd_create_documents_from_files` | Bulk-publish several `.md` files in one call |
 | `postmd_move_document_to_group` | Move a document into a group / folder |
 
+Notes and highlights — key with `documents:read` / `documents:write`. A note is
+text anchored to a quoted passage; a highlight is the same object carrying only
+a colour. `PRIVATE` notes belong to the key's member; `SHARED` notes are
+comments every reader sees:
+
+| Tool | Purpose |
+|------|---------|
+| `postmd_list_notes` | Notes on a document: yours + every `SHARED` one |
+| `postmd_add_note` | Attach a note, or a colour-only highlight to a quoted passage |
+| `postmd_update_note` | Edit a note you wrote |
+| `postmd_resolve_note` | Mark a `SHARED` discussion settled, or reopen it |
+| `postmd_delete_note` | Delete yours, or a `SHARED` note on your document |
+| `postmd_list_my_notes` | Your notes across every document |
+
 Groups — key with `groups:read` / `groups:write`:
 
 | Tool | Purpose |
