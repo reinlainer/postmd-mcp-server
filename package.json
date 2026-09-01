@@ -1,6 +1,6 @@
 {
   "name": "postmd-mcp-server",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "MCP server for PostMD — publish Markdown, get a shareable web page",
   "mcpName": "io.github.reinlainer/postmd-mcp-server",
   "type": "module",
@@ -17,7 +17,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/reinlainer/postmd-mcp-server.git"
+    "url": "git+https://github.com/reinlainer/postmd-mcp-server.git"
   },
   "homepage": "https://postmd.turink.com",
   "keywords": [

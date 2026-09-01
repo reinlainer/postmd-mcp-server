@@ -4,3 +4,6 @@ node_modules/
 !.env.example
 *.log
 .DS_Store
+
+# 배포용 토큰을 담는 파일. 실수로 올라가면 그대로 유출이다.
+.npmrc

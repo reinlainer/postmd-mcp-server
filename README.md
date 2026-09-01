@@ -73,19 +73,21 @@ For uploads: either pass the full Markdown as the `markdown` argument, or pass a
 
 ## Quickstart
 
+Nothing to install. `npx` fetches the package and the MCP client spawns it.
+
 ```bash
-git clone https://github.com/reinlainer/postmd-mcp-server.git
-cd postmd-mcp-server
-npm ci
-node src/index.js      # normally spawned by the MCP client; use for debugging
+npx -y postmd-mcp-server
 ```
+
+Run it by hand only to check that it starts — it speaks MCP over stdin and stdout, so it
+will sit there waiting for a client.
 
 ## Client configuration
 
 Claude Code:
 
 ```bash
-claude mcp add postmd -- node /absolute/path/to/postmd-mcp-server/src/index.js
+claude mcp add postmd -- npx -y postmd-mcp-server
 ```
 
 Cursor (`~/.cursor/mcp.json`) and most other stdio clients:
@@ -95,12 +97,21 @@ Cursor (`~/.cursor/mcp.json`) and most other stdio clients:
   "mcpServers": {
     "PostMD": {
       "type": "stdio",
-      "command": "node",
-      "args": ["/absolute/path/to/postmd-mcp-server/src/index.js"],
+      "command": "npx",
+      "args": ["-y", "postmd-mcp-server"],
       "env": { "POSTMD_API_KEY": "pmk_…" }
     }
   }
 }
+```
+
+To run a checkout instead — changing the code, or debugging against a local PostMD —
+point the client at the file.
+
+```bash
+git clone https://github.com/reinlainer/postmd-mcp-server.git
+cd postmd-mcp-server && npm ci
+claude mcp add postmd-dev -- node "$PWD/src/index.js"
 ```
 
 Leave `env` out entirely for publish/read-only use. `cp .env.example .env` works too — the server loads its own `.env`.

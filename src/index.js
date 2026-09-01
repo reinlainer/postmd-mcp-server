@@ -176,9 +176,18 @@ const ATTACHMENT_MIME = {
   pdf: "application/pdf",
 };
 
-/** 만든 문서에는 나눠 줄 주소를 붙여 준다. 에이전트의 다음 행동이 바로 그것이다. */
+/**
+ * 만든 문서에는 나눠 줄 주소를 붙여 준다. 에이전트의 다음 행동이 바로 그것이다.
+ *
+ * 서버가 이미 `shareUrl` 을 돌려주면 그것을 쓴다. 서버는 요청이 실제로 들어온 주소를
+ * 보고 만들고, 여기서는 `POSTMD_BASE_URL` 을 보고 만든다. 자체 호스팅에서 그 둘이
+ * 다르면 값이 갈리는데, 사람에게 건너가는 주소는 서버가 아는 쪽이 맞다.
+ *
+ * 그래도 이 함수를 남겨 둔다. `shareUrl` 을 돌려주지 않는 구 버전 서버를 가리키는
+ * 설정이 있을 수 있고, 그때도 에이전트는 건넬 주소를 받아야 한다.
+ */
 function addShareUrl(ctx, data) {
-  if (data && typeof data.docCode === "string" && data.docCode) {
+  if (data && typeof data.docCode === "string" && data.docCode && !data.shareUrl) {
     data.shareUrl = `${ctx.base}/share/${encodeURIComponent(data.docCode)}`;
   }
 }
