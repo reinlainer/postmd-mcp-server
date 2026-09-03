@@ -17,7 +17,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
-const VERSION = "2.1.0";
+const VERSION = "2.2.0";
 
 /** 기본은 운영이다. 대부분의 사용자는 설정 없이 바로 쓰면 된다. */
 const DEFAULT_BASE_URL = "https://postmd.turink.com";
@@ -28,7 +28,10 @@ const SERVER_INSTRUCTIONS =
   "the HTTP API directly. Creating a document needs no API key; updating, deleting, " +
   "attachments and groups need POSTMD_API_KEY with the matching scope. Pass the full " +
   "Markdown in `markdown`, or pass a local `filePath` so this server reads the file " +
-  "itself. A successful create returns data.shareUrl — hand that URL to people.";
+  "itself. A successful create returns data.shareUrl — hand that URL to people. " +
+  "Creating without a key also returns data.controlToken and data.retainedUntil: the " +
+  "document is deleted at that instant, and the token is the only way to update or " +
+  "delete it. It is shown once, so report it to the person along with the URL.";
 
 function isDebug() {
   const v = process.env.POSTMD_DEBUG;
@@ -222,9 +225,38 @@ async function updateDocument(ctx, a, markdownBuffer) {
   }
   const r = await apiFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/update`, {
     method: "POST",
+    headers: tokenHeader(a),
     body: form,
   });
   return fromEnvelope(r);
+}
+
+/**
+ * 익명 발행 문서의 제어 토큰 인자.
+ *
+ * 키를 대신하는 것이 아니라 그 문서 하나에만 듣는다. 그래서 키가 없어도 이 값이 있으면
+ * 도구를 부를 수 있고, 키가 있어도 남의 익명 문서에는 이 값이 있어야 한다.
+ */
+const CONTROL_TOKEN_PROP = {
+  type: "string",
+  description:
+    "Control token from an anonymous publish answer (pmt_...). Lets you act on that one " +
+    "document without an API key.",
+};
+
+/** 제어 토큰을 헤더로 옮긴다. 서버는 회원 인증 헤더와 나눠서 받는다. */
+function tokenHeader(a) {
+  return a.controlToken ? { "X-Document-Token": String(a.controlToken) } : {};
+}
+
+/**
+ * 키가 없어도 제어 토큰이 있으면 통과시킨다.
+ *
+ * 토큰만으로 되는 일에 키를 요구하면, 방금 익명으로 발행하고 토큰을 받은 쪽이 자기 문서를
+ * 손대지 못한다.
+ */
+function missingKeyUnlessToken(ctx, a, scopes) {
+  return a.controlToken ? null : missingKey(ctx, scopes);
 }
 
 /** 문서 메타데이터 공통 속성. 만들기·고치기 스키마가 나눠 쓴다. */
@@ -246,8 +278,11 @@ const TOOL_DEFS = [
     name: "postmd_create_document",
     description:
       "Publish Markdown as a PostMD web page. No API key required — anyone can publish. " +
-      "Returns docCode and data.shareUrl; hand shareUrl to people. With an API key the " +
-      "document belongs to that member and can be updated later; groupId files it into " +
+      "Returns docCode and data.shareUrl; hand shareUrl to people. Without a key the " +
+      "document is anonymous: data.retainedUntil is when it is deleted and " +
+      "data.controlToken is the only way to update or delete it, shown once and never " +
+      "reissued — report both to the person. With an API key the document belongs to that " +
+      "member, has no expiry, needs no token and can collect notes; groupId files it into " +
       "that group instead of the default one (key with documents:write).",
     inputSchema: {
       type: "object",
@@ -271,7 +306,8 @@ const TOOL_DEFS = [
     name: "postmd_create_document_from_file",
     description:
       "Same as postmd_create_document, but reads the Markdown from filePath on the machine " +
-      "running this MCP server — use it for large files instead of pasting the body.",
+      "running this MCP server — use it for large files instead of pasting the body. " +
+      "Without an API key it returns data.controlToken and data.retainedUntil, same as above.",
     inputSchema: {
       type: "object",
       properties: {
@@ -338,9 +374,11 @@ const TOOL_DEFS = [
   {
     name: "postmd_update_document",
     description:
-      "Update a document you own. Requires an API key with documents:write. Include " +
-      "`markdown` to replace the stored content; any metadata field replaces that field. " +
-      "clearPassword / clearShareEndDate remove the password / end date.",
+      "Update a document. Requires an API key with documents:write for a document you own, " +
+      "or `controlToken` for an anonymously published one. Include `markdown` to replace " +
+      "the stored content; any metadata field replaces that field. clearPassword / " +
+      "clearShareEndDate remove the password / end date. Updating does not push back the " +
+      "deletion date of an anonymous document.",
     inputSchema: {
       type: "object",
       properties: {
@@ -354,6 +392,7 @@ const TOOL_DEFS = [
         ...DOC_META_PROPS,
         clearPassword: { type: "boolean", description: "true removes the password." },
         clearShareEndDate: { type: "boolean", description: "true removes the end date, making sharing open-ended." },
+        controlToken: CONTROL_TOKEN_PROP,
       },
       required: ["docCode"],
     },
@@ -362,7 +401,7 @@ const TOOL_DEFS = [
     name: "postmd_update_document_from_file",
     description:
       "Same as postmd_update_document, but reads the new Markdown from filePath on the " +
-      "machine running this MCP server.",
+      "machine running this MCP server. Takes `controlToken` the same way.",
     inputSchema: {
       type: "object",
       properties: {
@@ -376,6 +415,7 @@ const TOOL_DEFS = [
         ...DOC_META_PROPS,
         clearPassword: { type: "boolean", description: "true removes the password." },
         clearShareEndDate: { type: "boolean", description: "true removes the end date, making sharing open-ended." },
+        controlToken: CONTROL_TOKEN_PROP,
       },
       required: ["docCode", "filePath"],
     },
@@ -383,11 +423,13 @@ const TOOL_DEFS = [
   {
     name: "postmd_delete_document",
     description:
-      "Delete a document you own (recoverable for 30 days, then purged). Requires an API " +
-      "key with documents:write.",
+      "Delete a document. Requires an API key with documents:write for a document you own, " +
+      "or `controlToken` for an anonymously published one. There is no endpoint to undo " +
+      "this: the document stops being served at once and its stored content is erased about " +
+      "a month later.",
     inputSchema: {
       type: "object",
-      properties: { docCode: { type: "string" } },
+      properties: { docCode: { type: "string" }, controlToken: CONTROL_TOKEN_PROP },
       required: ["docCode"],
     },
   },
@@ -432,9 +474,10 @@ const TOOL_DEFS = [
     description:
       "Attach a note or highlight to a document. Requires an API key with documents:write. " +
       "Give `content` for a note, `color` alone for a colour-only highlight (then " +
-      "`quotedContent` is required — a highlight must point at a passage). scope PRIVATE " +
-      "(default) is visible only to the key's member; SHARED is visible to every reader " +
-      "and only allowed on documents owned by a person.",
+      "`quotedContent` is required — a highlight must point at a passage). Visibility comes " +
+      "from ownership: on the key member's own document choose PRIVATE (only they see it) or " +
+      "SHARED; on anyone else's document every note is SHARED, so omit scope. Documents " +
+      "nobody owns — anonymous uploads and service-owned pages — take no notes at all.",
     inputSchema: {
       type: "object",
       properties: {
@@ -456,7 +499,8 @@ const TOOL_DEFS = [
     name: "postmd_update_note",
     description:
       "Edit a note you wrote. Requires an API key with documents:write. Omitting scope " +
-      "keeps the current one. The note must keep text or a colour.",
+      "keeps the current one; a scope you do send follows the ownership rule above. The " +
+      "note must keep text or a colour.",
     inputSchema: {
       type: "object",
       properties: {
@@ -664,12 +708,12 @@ async function runTool(ctx, name, args) {
       }
     }
     case "postmd_update_document": {
-      const denied = missingKey(ctx, "documents:write");
+      const denied = missingKeyUnlessToken(ctx, a, "documents:write");
       if (denied) return denied;
       return await updateDocument(ctx, a, a.markdown ?? null);
     }
     case "postmd_update_document_from_file": {
-      const denied = missingKey(ctx, "documents:write");
+      const denied = missingKeyUnlessToken(ctx, a, "documents:write");
       if (denied) return denied;
       try {
         const { buffer, suggestedName } = await readLocalFile(a.filePath);
@@ -679,10 +723,11 @@ async function runTool(ctx, name, args) {
       }
     }
     case "postmd_delete_document": {
-      const denied = missingKey(ctx, "documents:write");
+      const denied = missingKeyUnlessToken(ctx, a, "documents:write");
       if (denied) return denied;
       const r = await apiFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/delete`, {
         method: "POST",
+        headers: tokenHeader(a),
       });
       return fromEnvelope(r);
     }

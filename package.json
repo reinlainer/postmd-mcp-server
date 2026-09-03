@@ -1,6 +1,6 @@
 {
   "name": "postmd-mcp-server",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "MCP server for PostMD — publish Markdown, get a shareable web page",
   "mcpName": "io.github.reinlainer/postmd-mcp-server",
   "type": "module",

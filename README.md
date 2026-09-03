@@ -4,6 +4,8 @@ stdio [Model Context Protocol](https://modelcontextprotocol.io) server for **[Po
 
 **Publishing needs no account and no key.** With zero configuration this server can already turn Markdown into a shareable page. An API key adds management: updating and deleting your documents, attachments, and groups.
 
+**Anonymous documents come with a control token.** Publishing without a key returns `data.controlToken` and `data.retainedUntil`: the document is deleted at that instant, and the token is the only way to update or delete it before then. It is shown once and cannot be reissued, so keep it with the `docCode`. Pass it as `controlToken` to the update and delete tools and they work without an API key.
+
 **HTTP reference:** [postmd.turink.com/docs/api](https://postmd.turink.com/docs/api) · machine-readable spec at [/api-docs](https://postmd.turink.com/api-docs)
 
 ## Requirements
@@ -36,19 +38,22 @@ Publishing and reading — no key needed:
 
 Managing documents — key with `documents:write`:
 
+Each of the first three also accepts `controlToken` instead of a key, for a document published anonymously.
+
 | Tool | Purpose |
 |------|---------|
 | `postmd_update_document` | Replace content and/or metadata; can clear password / end date |
 | `postmd_update_document_from_file` | Same, body read from a local `filePath` |
-| `postmd_delete_document` | Delete (recoverable for 30 days) |
+| `postmd_delete_document` | Delete a document (no undo) |
 | `postmd_upload_attachment` | Upload an image/PDF, get a URL to embed in Markdown |
 | `postmd_create_documents_from_files` | Bulk-publish several `.md` files in one call |
 | `postmd_move_document_to_group` | Move a document into a group / folder |
 
 Notes and highlights — key with `documents:read` / `documents:write`. A note is
 text anchored to a quoted passage; a highlight is the same object carrying only
-a colour. `PRIVATE` notes belong to the key's member; `SHARED` notes are
-comments every reader sees:
+a colour. Visibility comes from ownership: on the key member's own document a note
+is `PRIVATE` or `SHARED`, and on anyone else's document it is always `SHARED`.
+Documents nobody owns — anonymous uploads and service-owned pages — take no notes:
 
 | Tool | Purpose |
 |------|---------|
@@ -125,7 +130,7 @@ export POSTMD_API_KEY=pmk_…
 npm run smoke
 ```
 
-Creates a group and a passworded document, reads it back, updates it, clears the password, then deletes both.
+Creates a group and a passworded document, reads it back, updates it, clears the password, then deletes both. It also publishes one document with no credential and removes it with the control token.
 
 ## Stack
 
