@@ -1,0 +1,80 @@
+# 태그를 밀면 npm 과 MCP 레지스트리에 올린다.
+#
+# 두 곳 모두 토큰을 두지 않는다. GitHub 이 발급하는 단기 OIDC 토큰으로 인증한다.
+#
+#   npm            트러스티드 퍼블리셔. npmjs.com 의 패키지 설정에 이 저장소와 이 파일 이름을
+#                  한 번 등록해 두면 된다. 등록한 워크플로에서 온 요청만 받는다.
+#   MCP 레지스트리  io.github.<소유자> 네임스페이스는 그 소유자의 저장소에서 온 OIDC 토큰으로
+#                  증명된다. 별도 설정이 없다.
+#
+# 사람이 브라우저에서 승인하는 단계는 없다. 손으로 올리던 때는 npm 은 보안 키로 2차 인증을,
+# 레지스트리는 GitHub 기기 흐름 승인을 매번 요구했다.
+name: publish
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      # 두 곳의 인증이 모두 이 토큰으로 이루어진다.
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      # 트러스티드 퍼블리싱은 npm 11.5.1 이상에서만 된다. 러너에 실린 판을 믿지 않는다.
+      - name: Use a recent npm
+        run: npm install -g npm@latest
+
+      # 세 곳의 버전이 어긋나면 레지스트리가 거절한다. 올리기 전에 여기서 잡는다.
+      - name: Versions must match the tag
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          PKG=$(node -p "require('./package.json').version")
+          SRV=$(node -p "require('./server.json').version")
+          SRVPKG=$(node -p "require('./server.json').packages[0].version")
+          echo "tag=$TAG package.json=$PKG server.json=$SRV server.json/packages=$SRVPKG"
+          for v in "$PKG" "$SRV" "$SRVPKG"; do
+            if [ "$v" != "$TAG" ]; then
+              echo "::error::version mismatch — tag is $TAG"
+              exit 1
+            fi
+          done
+
+      - run: npm ci
+
+      - name: Syntax check
+        run: |
+          node --check src/index.js
+          node --check src/env.js
+          node --check scripts/smoke-test.mjs
+
+      # 이미 올라간 버전을 다시 올리면 npm 이 403 을 준다. 태그를 다시 밀거나 레지스트리
+      # 쪽만 다시 올려야 할 때 이 단계에서 멈추지 않도록 한다.
+      - name: Publish to npm
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          NAME=$(node -p "require('./package.json').name")
+          if npm view "$NAME@$VERSION" version > /dev/null 2>&1; then
+            echo "$NAME@$VERSION is already on npm — skipping"
+          else
+            npm publish --access public
+          fi
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Publish to the MCP registry
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
