@@ -223,6 +223,21 @@ async function updateDocument(ctx, a, markdownBuffer) {
   if ([...form.keys()].length === 0) {
     return textErr("Nothing to update: pass new markdown, or at least one metadata field.");
   }
+  /*
+    Replacing the content needs a decision about the notes anchored to it. Checked here so the
+    caller reads it as a missing argument rather than an HTTP error from the server.
+  */
+  if (markdownBuffer !== null) {
+    if (a.notesOnReplace !== "keep" && a.notesOnReplace !== "abort") {
+      return textErr(
+        "notesOnReplace is required when replacing the content: keep or abort. " +
+          "Notes are located by the text they quote, so replacing the body moves or loses " +
+          "where they point. keep replaces anyway; abort refuses when the document has notes " +
+          "anchored to its text.",
+      );
+    }
+    form.append("notesOnReplace", a.notesOnReplace);
+  }
   const r = await apiFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/update`, {
     method: "POST",
     headers: tokenHeader(a),
@@ -237,6 +252,17 @@ async function updateDocument(ctx, a, markdownBuffer) {
  * 키를 대신하는 것이 아니라 그 문서 하나에만 듣는다. 그래서 키가 없어도 이 값이 있으면
  * 도구를 부를 수 있고, 키가 있어도 남의 익명 문서에는 이 값이 있어야 한다.
  */
+const NOTES_ON_REPLACE_PROP = {
+  type: "string",
+  enum: ["keep", "abort"],
+  description:
+    "Required when replacing the content. Notes are located by the text they quote, so " +
+    "replacing the body moves or loses where they point: a note whose quote is gone loses " +
+    "its place in the body, and one whose quote now appears elsewhere points there. " +
+    "keep replaces anyway and leaves the notes. abort refuses when the document has notes " +
+    "anchored to its text, and the answer says how many.",
+};
+
 const CONTROL_TOKEN_PROP = {
   type: "string",
   description:
@@ -378,7 +404,7 @@ const TOOL_DEFS = [
       "or `controlToken` for an anonymously published one. Include `markdown` to replace " +
       "the stored content; any metadata field replaces that field. clearPassword / " +
       "clearShareEndDate remove the password / end date. Updating does not push back the " +
-      "deletion date of an anonymous document.",
+      "deletion date of an anonymous document. Replacing the content requires notesOnReplace.",
     inputSchema: {
       type: "object",
       properties: {
@@ -392,6 +418,7 @@ const TOOL_DEFS = [
         ...DOC_META_PROPS,
         clearPassword: { type: "boolean", description: "true removes the password." },
         clearShareEndDate: { type: "boolean", description: "true removes the end date, making sharing open-ended." },
+        notesOnReplace: NOTES_ON_REPLACE_PROP,
         controlToken: CONTROL_TOKEN_PROP,
       },
       required: ["docCode"],
@@ -415,9 +442,10 @@ const TOOL_DEFS = [
         ...DOC_META_PROPS,
         clearPassword: { type: "boolean", description: "true removes the password." },
         clearShareEndDate: { type: "boolean", description: "true removes the end date, making sharing open-ended." },
+        notesOnReplace: NOTES_ON_REPLACE_PROP,
         controlToken: CONTROL_TOKEN_PROP,
       },
-      required: ["docCode", "filePath"],
+      required: ["docCode", "filePath", "notesOnReplace"],
     },
   },
   {
