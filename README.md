@@ -49,6 +49,22 @@ Each of the first three also accepts `controlToken` instead of a key, for a docu
 | `postmd_create_documents_from_files` | Bulk-publish several `.md` files in one call |
 | `postmd_move_document_to_group` | Move a document into a group / folder |
 
+### Replacing content on a document that has notes
+
+Notes are located by the text they quote, not by a stored position. Replacing a
+document's body therefore moves or loses where they point: a note whose quote is
+gone loses its place in the body, and one whose quote now appears elsewhere points
+there instead. The note itself, including the quoted text, is kept either way.
+
+Both update tools require `notesOnReplace` whenever new content is sent.
+
+| Value | Effect |
+|-------|--------|
+| `keep` | Replaces the content and leaves the notes as they are |
+| `abort` | Refuses when the document has notes anchored to its text, and says how many |
+
+Metadata-only updates do not take it.
+
 Notes and highlights — key with `documents:read` / `documents:write`. A note is
 text anchored to a quoted passage; a highlight is the same object carrying only
 a colour. Visibility comes from ownership: on the key member's own document a note

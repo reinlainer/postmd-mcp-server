@@ -90,6 +90,22 @@ if (docCode) {
   const meta2 = await callJson(`/documents/${docCode}/meta`);
   check("password cleared", meta2.json?.data?.hasPassword === false, meta2.text);
 
+  // 5b. 본문을 갈아 끼울 때는 붙어 있는 메모를 어떻게 할지 골라야 한다
+  const bodyOnly = new FormData();
+  bodyOnly.append("file", new Blob([`# ${MARKER} v2\n\n다른 문장\n`], { type: "text/markdown" }), "v2.md");
+  const undecided = await callJson(`/documents/${docCode}/update`, { method: "POST", body: bodyOnly });
+  check(
+    "replacing content without notesOnReplace is refused",
+    undecided.json?.resultCode === "E_DOC_0009",
+    undecided.text,
+  );
+
+  const decided = new FormData();
+  decided.append("file", new Blob([`# ${MARKER} v2\n\n다른 문장\n`], { type: "text/markdown" }), "v2.md");
+  decided.append("notesOnReplace", "keep");
+  const replaced = await callJson(`/documents/${docCode}/update`, { method: "POST", body: decided });
+  check("replacing content with keep succeeds", replaced.json?.resultCode === "200", replaced.text);
+
   // 6. 그룹 목록에 보이는지
   if (groupId != null) {
     const listed = await callJson(`/groups/${groupId}/documents?q=smoke`);
