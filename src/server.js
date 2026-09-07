@@ -1,0 +1,1021 @@
+/**
+ * PostMD 공개 API(/api/v1) — MCP 서버의 본체.
+ *
+ * 도구 정의와 실행이 여기 있고 전송은 없다. 진입점이 둘이라 갈라 두었다 —
+ * `index.js` 가 stdio, `http.js` 가 원격이다. 도구를 두 벌로 갖지 않기 위한 분리이며,
+ * 전송에 따라 달라지는 것은 어느 도구를 여느냐 하나뿐이다(REMOTE_TOOLS).
+ *
+ * 필수 환경변수는 없다. POSTMD_BASE_URL 이 없으면 운영(https://postmd.turink.com)을
+ * 부르고, POSTMD_API_KEY 가 없으면 발행과 읽기만 할 수 있다 — 그것만으로도 PostMD 의
+ * 기본 쓰임은 다 된다. 문서 관리(수정·삭제)·첨부·그룹에는 키가 필요하며, 키 없이
+ * 그런 도구를 부르면 어느 스코프가 왜 필요한지 알려 준다.
+ *
+ * 도구 설명과 오류 문구는 영어다. 이 문장들은 사람이 아니라 에이전트가 읽는다.
+ */
+import "./env.js";
+import fs from "node:fs/promises";
+import path from "node:path";
+import process from "node:process";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { createRequire } from "node:module";
+
+/**
+ * 손으로 적어 두면 어긋난다. 실제로 package.json 이 2.3.0 일 때 여기가 2.2.0 이어서
+ * 서버가 클라이언트에 옛 판을 알리고 있었다. 발행 워크플로도 이 값은 검사하지 않는다.
+ */
+const VERSION = createRequire(import.meta.url)("../package.json").version;
+
+/** 기본은 운영이다. 대부분의 사용자는 설정 없이 바로 쓰면 된다. */
+const DEFAULT_BASE_URL = "https://postmd.turink.com";
+
+/** initialize 때 클라이언트에 전달되어, 모델이 도구를 고르기 전에 읽는다. */
+const INSTRUCTIONS_LOCAL =
+  "PostMD publishes Markdown as web pages. Use the postmd_* tools instead of calling " +
+  "the HTTP API directly. Creating a document needs no API key; updating, deleting, " +
+  "attachments and groups need POSTMD_API_KEY with the matching scope. Pass the full " +
+  "Markdown in `markdown`, or pass a local `filePath` so this server reads the file " +
+  "itself. A successful create returns data.shareUrl — hand that URL to people. " +
+  "Creating without a key also returns data.controlToken and data.retainedUntil: the " +
+  "document is deleted at that instant, and the token is the only way to update or " +
+  "delete it. It is shown once, so report it to the person along with the URL.";
+
+/**
+ * 원격에는 키를 건네줄 길이 없고 서버 기계에 사용자의 파일도 없다. 그래서 그 둘을 말하지
+ * 않는다 - 쓸 수 없는 것을 알려 주면 에이전트가 그것을 시도하다 실패한다.
+ */
+const INSTRUCTIONS_REMOTE =
+  "PostMD publishes Markdown as web pages. Use the postmd_* tools instead of calling " +
+  "the HTTP API directly. Nothing here needs an account, a sign-in or an API key. Pass " +
+  "the full Markdown in `markdown`. A successful create returns data.shareUrl - hand " +
+  "that URL to people. It also returns data.controlToken and data.retainedUntil: the " +
+  "document is deleted at that instant, and the token is the only way to update or " +
+  "delete it before then. It is shown once and cannot be reissued, so report it to the " +
+  "person along with the URL, and pass it back as `controlToken` to update or delete.";
+
+/**
+ * 원격에서 여는 도구. 자격 증명 없이 끝까지 가는 것만 남겼다 - 발행과 조회, 그리고 발행할
+ * 때 받은 제어 토큰으로 하는 수정·삭제다.
+ *
+ * 뺀 것은 두 부류다. API 키를 요구하는 도구는 원격에 키를 줄 길이 없어 부르면 반드시
+ * 실패하고, `filePath` 를 받는 도구는 그 파일이 이 서버가 도는 기계에 없다.
+ *
+ * 목록에 적은 것만 열린다. 새 도구가 생겨도 여기 이름을 적기 전에는 원격으로 나가지
+ * 않는다 - 반대로 두면 키가 필요한 도구가 조용히 딸려 나간다.
+ */
+const REMOTE_TOOLS = new Set([
+  "postmd_create_document",
+  "postmd_get_document",
+  "postmd_get_document_raw",
+  "postmd_update_document",
+  "postmd_delete_document",
+]);
+
+function isDebug() {
+  const v = process.env.POSTMD_DEBUG;
+  if (!v) return false;
+  const s = String(v).toLowerCase();
+  return s === "1" || s === "true" || s === "yes";
+}
+
+function debugStderr(line) {
+  if (isDebug()) process.stderr.write(`[postmd-mcp-server] ${line}\n`);
+}
+
+/** 로그에는 호스트와 경로만. 쿼리에 비밀이 실릴 수 있다. */
+function safeUrlForLog(urlString) {
+  try {
+    const u = new URL(urlString);
+    return `${u.protocol}//${u.host}${u.pathname}`;
+  } catch {
+    return "(invalid url)";
+  }
+}
+
+/** fetch·TLS·DNS 실패의 message·cause·code 를 한 줄로 편다. */
+function formatNetworkError(err) {
+  const parts = [];
+  let e = err;
+  let depth = 0;
+  while (e != null && depth < 10) {
+    if (e instanceof Error) {
+      let line = e.message;
+      if (typeof e.code === "string" && e.code) line += ` [code=${e.code}]`;
+      parts.push(line);
+      e = e.cause;
+    } else {
+      parts.push(String(e));
+      break;
+    }
+    depth++;
+  }
+  return parts.length ? parts.join(" | ") : String(err);
+}
+
+function normalizeBaseUrl(url) {
+  if (!url || typeof url !== "string") return "";
+  return url.trim().replace(/\/+$/, "");
+}
+
+function resolveConfig() {
+  const base = normalizeBaseUrl(process.env.POSTMD_BASE_URL) || DEFAULT_BASE_URL;
+  const key = (process.env.POSTMD_API_KEY || "").trim() || null;
+  return { base, key };
+}
+
+function textOk(text) {
+  return { content: [{ type: "text", text }] };
+}
+
+function textErr(message) {
+  return { content: [{ type: "text", text: message }], isError: true };
+}
+
+/**
+ * 키가 필요한 도구의 문지기. 키가 없으면 네트워크에 나가지 않고 여기서 알려 준다.
+ *
+ * 원격에는 키를 건네줄 길 자체가 없다. 그 자리에서 환경변수를 설정하라고 하면 부르는 쪽이
+ * 할 수 없는 일을 시키는 것이므로, 대신 발행할 때 받은 제어 토큰을 가리킨다.
+ */
+function missingKey(ctx, scopes) {
+  if (ctx.key) return null;
+  if (ctx.remote) {
+    return textErr(
+      "This server has no way to receive an API key. Pass `controlToken` instead — the " +
+        "token returned when the document was published, which is what an anonymous " +
+        "publisher uses to change or remove it. For the key-based tools, run the local " +
+        "server: npx -y postmd-mcp-server, with POSTMD_API_KEY set."
+    );
+  }
+  return textErr(
+    `This tool requires an API key with scope ${scopes}. ` +
+      `Set POSTMD_API_KEY — a signed-in member creates keys at ${ctx.base}/account.`
+  );
+}
+
+function truncate(text, max = 2000) {
+  const s = String(text ?? "");
+  return s.length > max ? `${s.slice(0, max)}… (${s.length} chars total)` : s;
+}
+
+/**
+ * /api/v1 호출. 키가 있으면 실어 보낸다 — 익명 발행 엔드포인트도 키를 받으면
+ * 그 회원 소유로 만들어 주므로, 있는 키를 숨길 이유가 없다.
+ */
+async function apiFetch(ctx, apiPath, init = {}) {
+  const url = `${ctx.base}/api/v1${apiPath}`;
+  const headers = new Headers(init.headers);
+  if (ctx.key) headers.set("Authorization", `Bearer ${ctx.key}`);
+  try {
+    const res = await fetch(url, { ...init, headers });
+    const ct = res.headers.get("content-type") || "";
+    const bodyText = await res.text();
+    if (ct.includes("application/json")) {
+      try {
+        return { status: res.status, json: JSON.parse(bodyText), bodyText };
+      } catch {
+        return { status: res.status, json: null, bodyText };
+      }
+    }
+    return { status: res.status, json: null, bodyText };
+  } catch (e) {
+    const diag = formatNetworkError(e);
+    debugStderr(`fetch ${safeUrlForLog(url)} → ${diag}`);
+    return { status: 0, json: null, bodyText: "", networkError: diag };
+  }
+}
+
+/**
+ * 응답 봉투를 도구 결과로 바꾼다.
+ *
+ * API 는 실패도 JSON 봉투로 준다. HTTP 상태가 아니라 resultCode 로 갈라야 하고,
+ * 실패는 isError 로 표시해야 에이전트가 성공으로 오독하지 않는다 — 예전 서버는
+ * 오류 봉투를 성공처럼 돌려주는 문제가 있었다.
+ */
+function fromEnvelope(r) {
+  if (r.networkError) return textErr(`Request failed: ${r.networkError}`);
+  if (!r.json) return textErr(`HTTP ${r.status}: ${truncate(r.bodyText)}`);
+  const text = JSON.stringify(r.json, null, 2);
+  return r.json.resultCode === "200" ? textOk(text) : { ...textErr(text) };
+}
+
+function query(params) {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null) qs.set(k, String(v));
+  }
+  const s = qs.toString();
+  return s ? `?${s}` : "";
+}
+
+/** 이 서버가 도는 기기의 파일을 읽는다. 원격 경로가 아니다. */
+async function readLocalFile(filePath) {
+  const raw = String(filePath ?? "").trim();
+  if (!raw) throw new Error("filePath is required");
+  const resolved = path.resolve(raw);
+  const st = await fs.stat(resolved);
+  if (!st.isFile()) throw new Error(`Not a regular file: ${resolved}`);
+  return { buffer: await fs.readFile(resolved), suggestedName: path.basename(resolved) };
+}
+
+/** 첨부는 서버가 확장자로 받아 준다. Content-Type 은 예의상 맞춰 보낸다. */
+const ATTACHMENT_MIME = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  bmp: "image/bmp",
+  pdf: "application/pdf",
+};
+
+/**
+ * 만든 문서에는 나눠 줄 주소를 붙여 준다. 에이전트의 다음 행동이 바로 그것이다.
+ *
+ * 서버가 이미 `shareUrl` 을 돌려주면 그것을 쓴다. 서버는 요청이 실제로 들어온 주소를
+ * 보고 만들고, 여기서는 `POSTMD_BASE_URL` 을 보고 만든다. 자체 호스팅에서 그 둘이
+ * 다르면 값이 갈리는데, 사람에게 건너가는 주소는 서버가 아는 쪽이 맞다.
+ *
+ * 그래도 이 함수를 남겨 둔다. `shareUrl` 을 돌려주지 않는 구 버전 서버를 가리키는
+ * 설정이 있을 수 있고, 그때도 에이전트는 건넬 주소를 받아야 한다.
+ */
+function addShareUrl(ctx, data) {
+  if (data && typeof data.docCode === "string" && data.docCode && !data.shareUrl) {
+    data.shareUrl = `${ctx.base}/share/${encodeURIComponent(data.docCode)}`;
+  }
+}
+
+function documentForm(a, markdownBuffer) {
+  const form = new FormData();
+  if (markdownBuffer != null) {
+    const fileName = a.fileName || "document.md";
+    form.append("file", new Blob([markdownBuffer], { type: "text/markdown" }), fileName);
+  }
+  if (a.title != null) form.append("title", String(a.title));
+  if (a.password != null) form.append("password", String(a.password));
+  if (a.shareEndDate != null) form.append("shareEndDate", String(a.shareEndDate));
+  if (a.viewerStyle != null) form.append("viewerStyle", String(a.viewerStyle));
+  return form;
+}
+
+async function createDocument(ctx, a, markdownBuffer) {
+  const form = documentForm(a, markdownBuffer);
+  if (a.groupId != null) form.append("groupId", String(a.groupId));
+  const r = await apiFetch(ctx, "/documents", { method: "POST", body: form });
+  if (r.json?.resultCode === "200") addShareUrl(ctx, r.json.data);
+  return fromEnvelope(r);
+}
+
+async function updateDocument(ctx, a, markdownBuffer) {
+  const form = documentForm(a, markdownBuffer);
+  if (a.clearPassword === true) form.append("clearPassword", "true");
+  if (a.clearShareEndDate === true) form.append("clearShareEndDate", "true");
+  if ([...form.keys()].length === 0) {
+    return textErr("Nothing to update: pass new markdown, or at least one metadata field.");
+  }
+  /*
+    Replacing the content needs a decision about the notes anchored to it. Checked here so the
+    caller reads it as a missing argument rather than an HTTP error from the server.
+  */
+  if (markdownBuffer !== null) {
+    if (a.notesOnReplace !== "keep" && a.notesOnReplace !== "abort") {
+      return textErr(
+        "notesOnReplace is required when replacing the content: keep or abort. " +
+          "Notes are located by the text they quote, so replacing the body moves or loses " +
+          "where they point. keep replaces anyway; abort refuses when the document has notes " +
+          "anchored to its text.",
+      );
+    }
+    form.append("notesOnReplace", a.notesOnReplace);
+  }
+  const r = await apiFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/update`, {
+    method: "POST",
+    headers: tokenHeader(a),
+    body: form,
+  });
+  return fromEnvelope(r);
+}
+
+/**
+ * 익명 발행 문서의 제어 토큰 인자.
+ *
+ * 키를 대신하는 것이 아니라 그 문서 하나에만 듣는다. 그래서 키가 없어도 이 값이 있으면
+ * 도구를 부를 수 있고, 키가 있어도 남의 익명 문서에는 이 값이 있어야 한다.
+ */
+const NOTES_ON_REPLACE_PROP = {
+  type: "string",
+  enum: ["keep", "abort"],
+  description:
+    "Required when replacing the content. Notes are located by the text they quote, so " +
+    "replacing the body moves or loses where they point: a note whose quote is gone loses " +
+    "its place in the body, and one whose quote now appears elsewhere points there. " +
+    "keep replaces anyway and leaves the notes. abort refuses when the document has notes " +
+    "anchored to its text, and the answer says how many.",
+};
+
+const CONTROL_TOKEN_PROP = {
+  type: "string",
+  description:
+    "Control token from an anonymous publish answer (pmt_...). Lets you act on that one " +
+    "document without an API key.",
+};
+
+/** 제어 토큰을 헤더로 옮긴다. 서버는 회원 인증 헤더와 나눠서 받는다. */
+function tokenHeader(a) {
+  return a.controlToken ? { "X-Document-Token": String(a.controlToken) } : {};
+}
+
+/**
+ * 키가 없어도 제어 토큰이 있으면 통과시킨다.
+ *
+ * 토큰만으로 되는 일에 키를 요구하면, 방금 익명으로 발행하고 토큰을 받은 쪽이 자기 문서를
+ * 손대지 못한다.
+ */
+function missingKeyUnlessToken(ctx, a, scopes) {
+  return a.controlToken ? null : missingKey(ctx, scopes);
+}
+
+/** 문서 메타데이터 공통 속성. 만들기·고치기 스키마가 나눠 쓴다. */
+const DOC_META_PROPS = {
+  password: { type: "string", description: "Readers must supply this password to see the content." },
+  shareEndDate: {
+    type: "string",
+    description: "yyyyMMdd. The document stops being served after this date. Omit for no end date.",
+  },
+  viewerStyle: {
+    type: "string",
+    description:
+      "Viewer theme: readable (default), github, minimal, report, pamphlet or dark. Unknown values fall back to readable.",
+  },
+};
+
+const TOOL_DEFS = [
+  {
+    name: "postmd_create_document",
+    description:
+      "Publish Markdown as a PostMD web page. No API key required — anyone can publish. " +
+      "Returns docCode and data.shareUrl; hand shareUrl to people. Without a key the " +
+      "document is anonymous: data.retainedUntil is when it is deleted and " +
+      "data.controlToken is the only way to update or delete it, shown once and never " +
+      "reissued — report both to the person. With an API key the document belongs to that " +
+      "member, has no expiry, needs no token and can collect notes; groupId files it into " +
+      "that group instead of the default one (key with documents:write).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        markdown: {
+          type: "string",
+          description: "Full Markdown document as one UTF-8 string (the entire source, not a summary).",
+        },
+        title: {
+          type: "string",
+          description: "Shown in the viewer and link previews. Defaults to fileName without .md.",
+        },
+        fileName: { type: "string", description: "Upload filename, must end in .md. Default document.md." },
+        ...DOC_META_PROPS,
+        groupId: { type: "number", description: "File the document in this group instead of the default group (needs an API key)." },
+      },
+      required: ["markdown"],
+    },
+  },
+  {
+    name: "postmd_create_document_from_file",
+    description:
+      "Same as postmd_create_document, but reads the Markdown from filePath on the machine " +
+      "running this MCP server — use it for large files instead of pasting the body. " +
+      "Without an API key it returns data.controlToken and data.retainedUntil, same as above.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        filePath: {
+          type: "string",
+          description: "Path to a .md file on the MCP server host, read as UTF-8. Prefer an absolute path.",
+        },
+        title: { type: "string", description: "Defaults to the file name without .md." },
+        fileName: { type: "string", description: "Upload filename. Defaults to the basename of filePath." },
+        ...DOC_META_PROPS,
+        groupId: { type: "number", description: "File the document in this group instead of the default group (needs an API key)." },
+      },
+      required: ["filePath"],
+    },
+  },
+  {
+    name: "postmd_create_documents_from_files",
+    description:
+      "Publish several .md files in one call (bulk upload). Requires an API key with " +
+      "documents:write. The outer resultCode is 200 even if some files failed — check " +
+      "data.succeeded and each entry in data.results.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        filePaths: {
+          type: "array",
+          items: { type: "string" },
+          description: "Paths to .md files on the MCP server host. Each becomes its own document.",
+        },
+        ...DOC_META_PROPS,
+        groupId: { type: "number", description: "File every document in this group instead of the default group." },
+      },
+      required: ["filePaths"],
+    },
+  },
+  {
+    name: "postmd_get_document",
+    description:
+      "Get document metadata by docCode: title, fileName, hasPassword, shareEndDate, " +
+      "viewerStyle, timestamps. Public — no API key needed. Content is not included; " +
+      "use postmd_get_document_raw for the Markdown source.",
+    annotations: { readOnlyHint: true },
+    inputSchema: {
+      type: "object",
+      properties: { docCode: { type: "string", description: "Document code, e.g. P-123-456-789." } },
+      required: ["docCode"],
+    },
+  },
+  {
+    name: "postmd_get_document_raw",
+    description:
+      "Get the stored Markdown source of a document. Public — no API key needed. " +
+      "Password-protected documents need `password`; expired documents cannot be read.",
+    annotations: { readOnlyHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        docCode: { type: "string" },
+        password: { type: "string", description: "Plain document password, if the document has one." },
+      },
+      required: ["docCode"],
+    },
+  },
+  {
+    name: "postmd_update_document",
+    description:
+      "Update a document. Requires an API key with documents:write for a document you own, " +
+      "or `controlToken` for an anonymously published one. Include `markdown` to replace " +
+      "the stored content; any metadata field replaces that field. clearPassword / " +
+      "clearShareEndDate remove the password / end date. Updating does not push back the " +
+      "deletion date of an anonymous document. Replacing the content requires notesOnReplace.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        docCode: { type: "string" },
+        markdown: {
+          type: "string",
+          description: "Full new Markdown body as one UTF-8 string. Omit if only metadata changes.",
+        },
+        title: { type: "string" },
+        fileName: { type: "string", description: "Upload filename when replacing content. Default document.md." },
+        ...DOC_META_PROPS,
+        clearPassword: { type: "boolean", description: "true removes the password." },
+        clearShareEndDate: { type: "boolean", description: "true removes the end date, making sharing open-ended." },
+        notesOnReplace: NOTES_ON_REPLACE_PROP,
+        controlToken: CONTROL_TOKEN_PROP,
+      },
+      required: ["docCode"],
+    },
+  },
+  {
+    name: "postmd_update_document_from_file",
+    description:
+      "Same as postmd_update_document, but reads the new Markdown from filePath on the " +
+      "machine running this MCP server. Takes `controlToken` the same way.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        docCode: { type: "string" },
+        filePath: {
+          type: "string",
+          description: "Path to a .md file on the MCP server host, read as UTF-8. Prefer an absolute path.",
+        },
+        title: { type: "string" },
+        fileName: { type: "string", description: "Upload filename. Defaults to the basename of filePath." },
+        ...DOC_META_PROPS,
+        clearPassword: { type: "boolean", description: "true removes the password." },
+        clearShareEndDate: { type: "boolean", description: "true removes the end date, making sharing open-ended." },
+        notesOnReplace: NOTES_ON_REPLACE_PROP,
+        controlToken: CONTROL_TOKEN_PROP,
+      },
+      required: ["docCode", "filePath", "notesOnReplace"],
+    },
+  },
+  {
+    name: "postmd_delete_document",
+    description:
+      "Delete a document. Requires an API key with documents:write for a document you own, " +
+      "or `controlToken` for an anonymously published one. There is no endpoint to undo " +
+      "this: the document stops being served at once and its stored content is erased about " +
+      "a month later.",
+    inputSchema: {
+      type: "object",
+      properties: { docCode: { type: "string" }, controlToken: CONTROL_TOKEN_PROP },
+      required: ["docCode"],
+    },
+  },
+  {
+    name: "postmd_upload_attachment",
+    description:
+      "Upload an image or PDF to reference from a document. Requires an API key with " +
+      "documents:write. Allowed types: png, jpg, jpeg, gif, webp, svg, bmp, pdf. Use the " +
+      "returned data.url as the image/link target in your Markdown, then publish the " +
+      "Markdown with postmd_create_document.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        filePath: {
+          type: "string",
+          description: "Path to the file on the MCP server host. Prefer an absolute path.",
+        },
+        fileName: { type: "string", description: "Upload filename. Defaults to the basename of filePath." },
+      },
+      required: ["filePath"],
+    },
+  },
+  {
+    name: "postmd_list_notes",
+    description:
+      "List notes and highlights on a document: your own plus every SHARED one, newest " +
+      "first. Requires an API key with documents:read. Each note carries mine and " +
+      "manageable flags — trust them instead of re-deriving permissions. Pass `password` " +
+      "for a password-protected document.",
+    annotations: { readOnlyHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        docCode: { type: "string" },
+        password: { type: "string", description: "Plain document password, if the document has one." },
+      },
+      required: ["docCode"],
+    },
+  },
+  {
+    name: "postmd_add_note",
+    description:
+      "Attach a note or highlight to a document. Requires an API key with documents:write. " +
+      "Give `content` for a note, `color` alone for a colour-only highlight (then " +
+      "`quotedContent` is required — a highlight must point at a passage). Visibility comes " +
+      "from ownership: on the key member's own document choose PRIVATE (only they see it) or " +
+      "SHARED; on anyone else's document every note is SHARED, so omit scope. Documents " +
+      "nobody owns — anonymous uploads and service-owned pages — take no notes at all.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        docCode: { type: "string" },
+        content: { type: "string", description: "Note text, up to 4000 characters. Omit for a colour-only highlight." },
+        quotedContent: {
+          type: "string",
+          description: "Passage of the body this note points to, up to 4000 characters. Matched by text, so it survives edits elsewhere.",
+        },
+        scope: { type: "string", description: "PRIVATE (default) or SHARED." },
+        color: { type: "string", description: "YELLOW, GREEN, BLUE or PURPLE." },
+        textStart: { type: "number", description: "Character offset where the quote starts in the body. Optional; speeds up re-anchoring." },
+        password: { type: "string", description: "Plain document password, if the document has one." },
+      },
+      required: ["docCode"],
+    },
+  },
+  {
+    name: "postmd_update_note",
+    description:
+      "Edit a note you wrote. Requires an API key with documents:write. Omitting scope " +
+      "keeps the current one; a scope you do send follows the ownership rule above. The " +
+      "note must keep text or a colour.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        docCode: { type: "string" },
+        noteId: { type: "number" },
+        content: { type: "string" },
+        quotedContent: { type: "string" },
+        scope: { type: "string", description: "PRIVATE or SHARED. Omit to keep the current scope." },
+        color: { type: "string", description: "YELLOW, GREEN, BLUE or PURPLE." },
+      },
+      required: ["docCode", "noteId"],
+    },
+  },
+  {
+    name: "postmd_resolve_note",
+    description:
+      "Mark a note as settled, or undo it with resolved=false. Meaningful on SHARED " +
+      "notes; the author or the document owner may set it. Requires an API key with " +
+      "documents:write.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        docCode: { type: "string" },
+        noteId: { type: "number" },
+        resolved: { type: "boolean", description: "true marks it settled; false reopens it." },
+      },
+      required: ["docCode", "noteId", "resolved"],
+    },
+  },
+  {
+    name: "postmd_delete_note",
+    description:
+      "Delete a note: your own, or a SHARED note on a document you own. Requires an API " +
+      "key with documents:write.",
+    inputSchema: {
+      type: "object",
+      properties: { docCode: { type: "string" }, noteId: { type: "number" } },
+      required: ["docCode", "noteId"],
+    },
+  },
+  {
+    name: "postmd_list_my_notes",
+    description:
+      "List every note the key's member wrote, across all documents, with docCode and " +
+      "documentTitle beside each one. Requires an API key with documents:read.",
+    annotations: { readOnlyHint: true },
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "postmd_list_groups",
+    description: "List groups the key's member belongs to. Requires an API key with groups:read. Paged.",
+    annotations: { readOnlyHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        page: { type: "number", description: "1-based page number." },
+        size: { type: "number", description: "Items per page." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "postmd_list_group_documents",
+    description:
+      "List documents in a group. Requires an API key with groups:read and documents:read. " +
+      "Paged; q searches title and file name (substring, case-insensitive).",
+    annotations: { readOnlyHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        groupId: { type: "number" },
+        folderId: { type: "number", description: "Only documents filed in this folder." },
+        rootOnly: { type: "boolean", description: "true → only documents not in any folder." },
+        q: { type: "string", description: "Search text for title and file name." },
+        sort: {
+          type: "string",
+          description: "recent (default), oldest, name, name_desc, created or created_asc.",
+        },
+        page: { type: "number" },
+        size: { type: "number" },
+      },
+      required: ["groupId"],
+    },
+  },
+  {
+    name: "postmd_move_document_to_group",
+    description:
+      "Move a document you own into a group you can use, optionally into a folder of that " +
+      "group. A document belongs to exactly one group, so this replaces its current group. " +
+      "Requires an API key with documents:write.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        docCode: { type: "string" },
+        groupId: { type: "number" },
+        folderId: { type: "number", description: "File it into this folder of that group." },
+      },
+      required: ["docCode", "groupId"],
+    },
+  },
+  {
+    name: "postmd_create_group",
+    description:
+      "Create a group. Requires an API key with groups:write. Documents can then be filed " +
+      "into it and members invited from the web app.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        expireDate: { type: "string", description: "yyyyMMdd. The group stops working after this date." },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "postmd_update_group",
+    description:
+      "Rename a group or change its expiry. Owner only. Requires an API key with " +
+      "groups:write. clearExpireDate removes the expiry.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        groupId: { type: "number" },
+        name: { type: "string" },
+        expireDate: { type: "string", description: "yyyyMMdd." },
+        clearExpireDate: { type: "boolean", description: "true removes the expiry date." },
+      },
+      required: ["groupId"],
+    },
+  },
+  {
+    name: "postmd_delete_group",
+    description:
+      "Delete a group. Owner only; the default group cannot be deleted. Documents in it " +
+      "are not deleted. Requires an API key with groups:write.",
+    inputSchema: {
+      type: "object",
+      properties: { groupId: { type: "number" } },
+      required: ["groupId"],
+    },
+  },
+];
+
+async function runTool(ctx, name, args) {
+  const a = args && typeof args === "object" ? args : {};
+
+  switch (name) {
+    case "postmd_create_document": {
+      if (typeof a.markdown !== "string" || a.markdown.length === 0) {
+        return textErr("markdown is required: the full document source as one string.");
+      }
+      return await createDocument(ctx, a, a.markdown);
+    }
+    case "postmd_create_document_from_file": {
+      try {
+        const { buffer, suggestedName } = await readLocalFile(a.filePath);
+        return await createDocument(ctx, { ...a, fileName: a.fileName ?? suggestedName }, buffer);
+      } catch (e) {
+        return textErr(e instanceof Error ? e.message : String(e));
+      }
+    }
+    case "postmd_create_documents_from_files": {
+      const denied = missingKey(ctx, "documents:write");
+      if (denied) return denied;
+      if (!Array.isArray(a.filePaths) || a.filePaths.length === 0) {
+        return textErr("filePaths is required: one path per document.");
+      }
+      const form = new FormData();
+      try {
+        for (const p of a.filePaths) {
+          const { buffer, suggestedName } = await readLocalFile(p);
+          form.append("files", new Blob([buffer], { type: "text/markdown" }), suggestedName);
+        }
+      } catch (e) {
+        return textErr(e instanceof Error ? e.message : String(e));
+      }
+      if (a.password != null) form.append("password", String(a.password));
+      if (a.shareEndDate != null) form.append("shareEndDate", String(a.shareEndDate));
+      if (a.viewerStyle != null) form.append("viewerStyle", String(a.viewerStyle));
+      if (a.groupId != null) form.append("groupId", String(a.groupId));
+      const r = await apiFetch(ctx, "/documents/bulk", { method: "POST", body: form });
+      if (r.json?.resultCode === "200" && Array.isArray(r.json.data?.results)) {
+        for (const item of r.json.data.results) addShareUrl(ctx, item);
+      }
+      return fromEnvelope(r);
+    }
+    case "postmd_get_document": {
+      const r = await apiFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/meta`);
+      return fromEnvelope(r);
+    }
+    case "postmd_get_document_raw": {
+      const url = `${ctx.base}/api/v1/documents/${encodeURIComponent(a.docCode)}/raw`;
+      const headers = {};
+      if (ctx.key) headers.Authorization = `Bearer ${ctx.key}`;
+      if (a.password) headers["X-Document-Password"] = String(a.password);
+      try {
+        const res = await fetch(url, { headers });
+        const t = await res.text();
+        if (!res.ok) return textErr(`HTTP ${res.status}: ${truncate(t)}`);
+        return textOk(t);
+      } catch (e) {
+        const diag = formatNetworkError(e);
+        debugStderr(`fetch ${safeUrlForLog(url)} → ${diag}`);
+        return textErr(`Request failed: ${diag}`);
+      }
+    }
+    case "postmd_update_document": {
+      const denied = missingKeyUnlessToken(ctx, a, "documents:write");
+      if (denied) return denied;
+      return await updateDocument(ctx, a, a.markdown ?? null);
+    }
+    case "postmd_update_document_from_file": {
+      const denied = missingKeyUnlessToken(ctx, a, "documents:write");
+      if (denied) return denied;
+      try {
+        const { buffer, suggestedName } = await readLocalFile(a.filePath);
+        return await updateDocument(ctx, { ...a, fileName: a.fileName ?? suggestedName }, buffer);
+      } catch (e) {
+        return textErr(e instanceof Error ? e.message : String(e));
+      }
+    }
+    case "postmd_delete_document": {
+      const denied = missingKeyUnlessToken(ctx, a, "documents:write");
+      if (denied) return denied;
+      const r = await apiFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/delete`, {
+        method: "POST",
+        headers: tokenHeader(a),
+      });
+      return fromEnvelope(r);
+    }
+    case "postmd_upload_attachment": {
+      const denied = missingKey(ctx, "documents:write");
+      if (denied) return denied;
+      try {
+        const { buffer, suggestedName } = await readLocalFile(a.filePath);
+        const fileName = a.fileName || suggestedName;
+        const ext = path.extname(fileName).slice(1).toLowerCase();
+        const mime = ATTACHMENT_MIME[ext] || "application/octet-stream";
+        const form = new FormData();
+        form.append("file", new Blob([buffer], { type: mime }), fileName);
+        const r = await apiFetch(ctx, "/documents/uploads", { method: "POST", body: form });
+        return fromEnvelope(r);
+      } catch (e) {
+        return textErr(e instanceof Error ? e.message : String(e));
+      }
+    }
+    case "postmd_list_notes": {
+      const denied = missingKey(ctx, "documents:read");
+      if (denied) return denied;
+      const headers = {};
+      if (a.password) headers["X-Document-Password"] = String(a.password);
+      const r = await apiFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/notes`, { headers });
+      return fromEnvelope(r);
+    }
+    case "postmd_add_note": {
+      const denied = missingKey(ctx, "documents:write");
+      if (denied) return denied;
+      const body = {};
+      if (a.content != null) body.content = String(a.content);
+      if (a.quotedContent != null) body.quotedContent = String(a.quotedContent);
+      if (a.scope != null) body.scope = String(a.scope);
+      if (a.color != null) body.color = String(a.color);
+      if (a.textStart != null) body.textStart = Number(a.textStart);
+      const headers = { "Content-Type": "application/json" };
+      if (a.password) headers["X-Document-Password"] = String(a.password);
+      const r = await apiFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/notes`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+      return fromEnvelope(r);
+    }
+    case "postmd_update_note": {
+      const denied = missingKey(ctx, "documents:write");
+      if (denied) return denied;
+      const body = {};
+      if (a.content != null) body.content = String(a.content);
+      if (a.quotedContent != null) body.quotedContent = String(a.quotedContent);
+      if (a.scope != null) body.scope = String(a.scope);
+      if (a.color != null) body.color = String(a.color);
+      const r = await apiFetch(
+        ctx,
+        `/documents/${encodeURIComponent(a.docCode)}/notes/${Number(a.noteId)}/update`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+      );
+      return fromEnvelope(r);
+    }
+    case "postmd_resolve_note": {
+      const denied = missingKey(ctx, "documents:write");
+      if (denied) return denied;
+      const r = await apiFetch(
+        ctx,
+        `/documents/${encodeURIComponent(a.docCode)}/notes/${Number(a.noteId)}/resolve`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ resolved: a.resolved === true }),
+        }
+      );
+      return fromEnvelope(r);
+    }
+    case "postmd_delete_note": {
+      const denied = missingKey(ctx, "documents:write");
+      if (denied) return denied;
+      const r = await apiFetch(
+        ctx,
+        `/documents/${encodeURIComponent(a.docCode)}/notes/${Number(a.noteId)}/delete`,
+        { method: "POST" }
+      );
+      return fromEnvelope(r);
+    }
+    case "postmd_list_my_notes": {
+      const denied = missingKey(ctx, "documents:read");
+      if (denied) return denied;
+      const r = await apiFetch(ctx, "/notes");
+      return fromEnvelope(r);
+    }
+    case "postmd_list_groups": {
+      const denied = missingKey(ctx, "groups:read");
+      if (denied) return denied;
+      const r = await apiFetch(ctx, `/groups${query({ page: a.page, size: a.size })}`);
+      return fromEnvelope(r);
+    }
+    case "postmd_list_group_documents": {
+      const denied = missingKey(ctx, "groups:read and documents:read");
+      if (denied) return denied;
+      const qs = query({
+        folderId: a.folderId,
+        rootOnly: a.rootOnly,
+        q: a.q,
+        sort: a.sort,
+        page: a.page,
+        size: a.size,
+      });
+      const r = await apiFetch(ctx, `/groups/${Number(a.groupId)}/documents${qs}`);
+      return fromEnvelope(r);
+    }
+    case "postmd_move_document_to_group": {
+      const denied = missingKey(ctx, "documents:write");
+      if (denied) return denied;
+      const body = { groupId: a.groupId };
+      if (a.folderId != null) body.folderId = a.folderId;
+      const r = await apiFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/group`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return fromEnvelope(r);
+    }
+    case "postmd_create_group": {
+      const denied = missingKey(ctx, "groups:write");
+      if (denied) return denied;
+      const body = { name: a.name };
+      if (a.expireDate != null) body.expireDate = a.expireDate;
+      const r = await apiFetch(ctx, "/groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return fromEnvelope(r);
+    }
+    case "postmd_update_group": {
+      const denied = missingKey(ctx, "groups:write");
+      if (denied) return denied;
+      const body = {};
+      if (a.name != null) body.name = a.name;
+      if (a.expireDate != null) body.expireDate = a.expireDate;
+      if (a.clearExpireDate === true) body.clearExpireDate = true;
+      const r = await apiFetch(ctx, `/groups/${Number(a.groupId)}/update`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return fromEnvelope(r);
+    }
+    case "postmd_delete_group": {
+      const denied = missingKey(ctx, "groups:write");
+      if (denied) return denied;
+      const r = await apiFetch(ctx, `/groups/${Number(a.groupId)}/delete`, { method: "POST" });
+      return fromEnvelope(r);
+    }
+    default:
+      return textErr(`Unknown tool: ${name}`);
+  }
+}
+
+/**
+ * 도구를 붙인 MCP 서버를 만든다. 전송은 붙이지 않는다 - 부르는 쪽이 고른다.
+ *
+ * `remote` 는 인터넷에서 아무나 부르는 자리라는 뜻이다. 그 자리에서는 키를 강제로
+ * 비운다. 컨테이너 환경에 POSTMD_API_KEY 가 섞여 들어오면 낯선 사람이 발행한 문서가
+ * 모두 그 키의 주인 소유로 만들어지기 때문이다(`apiFetch` 가 키를 늘 실어 보낸다).
+ */
+export function createMcpServer({ remote = false } = {}) {
+  const config = resolveConfig();
+  const ctx = remote ? { base: config.base, key: null, remote: true } : { ...config, remote: false };
+
+  debugStderr(
+    `debug on | ${remote ? "remote" : "stdio"} | base ${ctx.base} | ` +
+      `key ${ctx.key ? "set" : "not set (publish/read only)"}`
+  );
+
+  const tools = remote ? TOOL_DEFS.filter((t) => REMOTE_TOOLS.has(t.name)) : TOOL_DEFS;
+
+  const server = new Server(
+    { name: "postmd-mcp-server", version: VERSION },
+    {
+      capabilities: { tools: {} },
+      instructions: remote ? INSTRUCTIONS_REMOTE : INSTRUCTIONS_LOCAL,
+    }
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
+
+    // 목록에서 뺐다고 못 부르는 것이 아니다. 이름을 알면 그냥 부를 수 있으므로 여기서 막는다.
+    if (remote && !REMOTE_TOOLS.has(name)) {
+      return textErr(
+        `${name} is not available on this remote server: it needs either an API key or a ` +
+          `file on the server's own disk. Run the stdio server for it — ` +
+          `npx -y postmd-mcp-server, with POSTMD_API_KEY set.`
+      );
+    }
+
+    try {
+      return await runTool(ctx, name, args);
+    } catch (e) {
+      const msg = formatNetworkError(e);
+      debugStderr(`tool ${name} threw: ${msg}`);
+      return textErr(msg);
+    }
+  });
+
+  return server;
+}
+
+export { VERSION, REMOTE_TOOLS, debugStderr };
