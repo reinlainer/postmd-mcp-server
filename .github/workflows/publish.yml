@@ -74,7 +74,34 @@ jobs:
         run: |
           curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
 
+      # 레지스트리는 소유권을 npm 으로 확인한다. 방금 올린 판의 메타데이터를 받아 mcpName 이
+      # 서버 이름과 같은지 본다. 그런데 npm 에 올린 직후에는 그 버전이 아직 보이지 않아
+      # 곧바로 부르면 404 로 떨어진다. 2.4.0 이 실제로 이렇게 실패했다 - npm 에는 올라갔는데
+      # 레지스트리만 빠져 두 곳이 어긋났다. 보일 때까지 기다린 다음 넘어간다.
+      - name: Wait until npm serves this version
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          for i in $(seq 1 30); do
+            MCP_NAME=$(curl -fsS "https://registry.npmjs.org/$NAME/$VERSION" 2>/dev/null \
+              | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(JSON.parse(s).mcpName||'')}catch(e){}})")
+            if [ -n "$MCP_NAME" ]; then
+              echo "npm serves $NAME@$VERSION with mcpName $MCP_NAME"
+              exit 0
+            fi
+            echo "attempt $i/30: not visible yet"
+            sleep 10
+          done
+          echo "::error::npm did not serve $NAME@$VERSION within 5 minutes"
+          exit 1
+
+      # 기다린 뒤에도 순간적으로 실패할 수 있다. 같은 버전을 다시 올리는 것은 문제가 없다.
       - name: Publish to the MCP registry
         run: |
           ./mcp-publisher login github-oidc
-          ./mcp-publisher publish
+          for i in 1 2 3; do
+            if ./mcp-publisher publish; then exit 0; fi
+            echo "publish failed ($i/3), retrying in 20s"
+            sleep 20
+          done
+          exit 1
