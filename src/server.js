@@ -361,6 +361,7 @@ const TOOL_DEFS = [
       "reissued — report both to the person. With an API key the document belongs to that " +
       "member, has no expiry, needs no token and can collect notes; groupId files it into " +
       "that group instead of the default one (key with documents:write).",
+    annotations: { title: "Publish document", destructiveHint: false },
     inputSchema: {
       type: "object",
       properties: {
@@ -385,6 +386,7 @@ const TOOL_DEFS = [
       "Same as postmd_create_document, but reads the Markdown from filePath on the machine " +
       "running this MCP server — use it for large files instead of pasting the body. " +
       "Without an API key it returns data.controlToken and data.retainedUntil, same as above.",
+    annotations: { title: "Publish document from file", destructiveHint: false },
     inputSchema: {
       type: "object",
       properties: {
@@ -406,6 +408,7 @@ const TOOL_DEFS = [
       "Publish several .md files in one call (bulk upload). Requires an API key with " +
       "documents:write. The outer resultCode is 200 even if some files failed — check " +
       "data.succeeded and each entry in data.results.",
+    annotations: { title: "Publish documents from files", destructiveHint: false },
     inputSchema: {
       type: "object",
       properties: {
@@ -426,7 +429,7 @@ const TOOL_DEFS = [
       "Get document metadata by docCode: title, fileName, hasPassword, shareEndDate, " +
       "viewerStyle, timestamps. Public — no API key needed. Content is not included; " +
       "use postmd_get_document_raw for the Markdown source.",
-    annotations: { readOnlyHint: true },
+    annotations: { title: "Get document info", readOnlyHint: true },
     inputSchema: {
       type: "object",
       properties: { docCode: { type: "string", description: "Document code, e.g. P-123-456-789." } },
@@ -438,7 +441,7 @@ const TOOL_DEFS = [
     description:
       "Get the stored Markdown source of a document. Public — no API key needed. " +
       "Password-protected documents need `password`; expired documents cannot be read.",
-    annotations: { readOnlyHint: true },
+    annotations: { title: "Get document source", readOnlyHint: true },
     inputSchema: {
       type: "object",
       properties: {
@@ -456,6 +459,7 @@ const TOOL_DEFS = [
       "the stored content; any metadata field replaces that field. clearPassword / " +
       "clearShareEndDate remove the password / end date. Updating does not push back the " +
       "deletion date of an anonymous document. Replacing the content requires notesOnReplace.",
+    annotations: { title: "Update document", destructiveHint: true },
     inputSchema: {
       type: "object",
       properties: {
@@ -480,6 +484,7 @@ const TOOL_DEFS = [
     description:
       "Same as postmd_update_document, but reads the new Markdown from filePath on the " +
       "machine running this MCP server. Takes `controlToken` the same way.",
+    annotations: { title: "Update document from file", destructiveHint: true },
     inputSchema: {
       type: "object",
       properties: {
@@ -506,6 +511,7 @@ const TOOL_DEFS = [
       "or `controlToken` for an anonymously published one. There is no endpoint to undo " +
       "this: the document stops being served at once and its stored content is erased about " +
       "a month later.",
+    annotations: { title: "Delete document", destructiveHint: true },
     inputSchema: {
       type: "object",
       properties: { docCode: { type: "string" }, controlToken: CONTROL_TOKEN_PROP },
@@ -519,6 +525,7 @@ const TOOL_DEFS = [
       "documents:write. Allowed types: png, jpg, jpeg, gif, webp, svg, bmp, pdf. Use the " +
       "returned data.url as the image/link target in your Markdown, then publish the " +
       "Markdown with postmd_create_document.",
+    annotations: { title: "Upload attachment", destructiveHint: false },
     inputSchema: {
       type: "object",
       properties: {
@@ -538,7 +545,7 @@ const TOOL_DEFS = [
       "first. Requires an API key with documents:read. Each note carries mine and " +
       "manageable flags — trust them instead of re-deriving permissions. Pass `password` " +
       "for a password-protected document.",
-    annotations: { readOnlyHint: true },
+    annotations: { title: "List notes on a document", readOnlyHint: true },
     inputSchema: {
       type: "object",
       properties: {
@@ -557,6 +564,7 @@ const TOOL_DEFS = [
       "from ownership: on the key member's own document choose PRIVATE (only they see it) or " +
       "SHARED; on anyone else's document every note is SHARED, so omit scope. Documents " +
       "nobody owns — anonymous uploads and service-owned pages — take no notes at all.",
+    annotations: { title: "Add note or highlight", destructiveHint: false },
     inputSchema: {
       type: "object",
       properties: {
@@ -580,6 +588,7 @@ const TOOL_DEFS = [
       "Edit a note you wrote. Requires an API key with documents:write. Omitting scope " +
       "keeps the current one; a scope you do send follows the ownership rule above. The " +
       "note must keep text or a colour.",
+    annotations: { title: "Edit note", destructiveHint: false },
     inputSchema: {
       type: "object",
       properties: {
@@ -599,6 +608,7 @@ const TOOL_DEFS = [
       "Mark a note as settled, or undo it with resolved=false. Meaningful on SHARED " +
       "notes; the author or the document owner may set it. Requires an API key with " +
       "documents:write.",
+    annotations: { title: "Resolve or reopen note", destructiveHint: false },
     inputSchema: {
       type: "object",
       properties: {
@@ -614,6 +624,7 @@ const TOOL_DEFS = [
     description:
       "Delete a note: your own, or a SHARED note on a document you own. Requires an API " +
       "key with documents:write.",
+    annotations: { title: "Delete note", destructiveHint: true },
     inputSchema: {
       type: "object",
       properties: { docCode: { type: "string" }, noteId: { type: "number" } },
@@ -625,13 +636,13 @@ const TOOL_DEFS = [
     description:
       "List every note the key's member wrote, across all documents, with docCode and " +
       "documentTitle beside each one. Requires an API key with documents:read.",
-    annotations: { readOnlyHint: true },
+    annotations: { title: "List my notes", readOnlyHint: true },
     inputSchema: { type: "object", properties: {}, required: [] },
   },
   {
     name: "postmd_list_groups",
     description: "List groups the key's member belongs to. Requires an API key with groups:read. Paged.",
-    annotations: { readOnlyHint: true },
+    annotations: { title: "List groups", readOnlyHint: true },
     inputSchema: {
       type: "object",
       properties: {
@@ -646,7 +657,7 @@ const TOOL_DEFS = [
     description:
       "List documents in a group. Requires an API key with groups:read and documents:read. " +
       "Paged; q searches title and file name (substring, case-insensitive).",
-    annotations: { readOnlyHint: true },
+    annotations: { title: "List documents in a group", readOnlyHint: true },
     inputSchema: {
       type: "object",
       properties: {
@@ -670,6 +681,7 @@ const TOOL_DEFS = [
       "Move a document you own into a group you can use, optionally into a folder of that " +
       "group. A document belongs to exactly one group, so this replaces its current group. " +
       "Requires an API key with documents:write.",
+    annotations: { title: "Move document to a group", destructiveHint: false },
     inputSchema: {
       type: "object",
       properties: {
@@ -685,6 +697,7 @@ const TOOL_DEFS = [
     description:
       "Create a group. Requires an API key with groups:write. Documents can then be filed " +
       "into it and members invited from the web app.",
+    annotations: { title: "Create group", destructiveHint: false },
     inputSchema: {
       type: "object",
       properties: {
@@ -699,6 +712,7 @@ const TOOL_DEFS = [
     description:
       "Rename a group or change its expiry. Owner only. Requires an API key with " +
       "groups:write. clearExpireDate removes the expiry.",
+    annotations: { title: "Update group", destructiveHint: false },
     inputSchema: {
       type: "object",
       properties: {
@@ -715,6 +729,7 @@ const TOOL_DEFS = [
     description:
       "Delete a group. Owner only; the default group cannot be deleted. Documents in it " +
       "are not deleted. Requires an API key with groups:write.",
+    annotations: { title: "Delete group", destructiveHint: true },
     inputSchema: {
       type: "object",
       properties: { groupId: { type: "number" } },
