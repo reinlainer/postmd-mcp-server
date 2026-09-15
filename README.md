@@ -1,6 +1,6 @@
 # PostMD MCP Server
 
-stdio [Model Context Protocol](https://modelcontextprotocol.io) server for **[PostMD](https://postmd.turink.com)** — publish a Markdown document, get a web page you share by link. Optional groups, document passwords, share expiry and viewer themes. This server wraps PostMD's public API (`/api/v1`) so assistants can publish, read, update and organize documents.
+[Model Context Protocol](https://modelcontextprotocol.io) server for **[PostMD](https://postmd.turink.com)** — publish a Markdown document, get a web page you share by link. Run it locally over stdio, or point your client at the hosted server and install nothing. Optional groups, document passwords, share expiry and viewer themes. This server wraps PostMD's public API (`/api/v1`) so assistants can publish, read, update and organize documents.
 
 **Publishing needs no account and no key.** With zero configuration this server can already turn Markdown into a shareable page. An API key adds management: updating and deleting your documents, attachments, and groups.
 
@@ -8,14 +8,31 @@ stdio [Model Context Protocol](https://modelcontextprotocol.io) server for **[Po
 
 **HTTP reference:** [postmd.turink.com/docs/api](https://postmd.turink.com/docs/api) · machine-readable spec at [/api-docs](https://postmd.turink.com/api-docs)
 
+## Two ways to run it
+
+| | Hosted | Local |
+|---|---|---|
+| Address | `https://postmd.turink.com/mcp` | `npx -y postmd-mcp-server` |
+| Needs | nothing | Node.js 20 or later |
+| Tools | 5 | all 21 |
+| API key | not accepted | optional, for the management tools |
+| Clients | any, including web-only ones such as ChatGPT and claude.ai | any that can run a local process |
+
+The hosted server has no way to receive an API key, so it carries only the tools that
+need none: publishing, reading, and the update and delete that an anonymous publisher
+performs with the `controlToken` returned at publish time. Attachments, groups, notes and
+the tools that read a file from your disk are local-only.
+
 ## Requirements
+
+The hosted server needs nothing at all. To run it locally:
 
 - **Node.js** 20 or later
 - Nothing else. An **API key** (`pmk_…`) only for the management tools.
 
 ## Configuration
 
-All variables are optional.
+Local only — the hosted server reads none of these. All are optional.
 
 | Variable | Description |
 |----------|-------------|
@@ -27,14 +44,17 @@ Load order: this repo's `.env` (if present) is applied via `dotenv` without over
 
 ## Tools
 
+The five marked **hosted** are the ones the hosted server carries. Every tool below works
+on the local server.
+
 Publishing and reading — no key needed:
 
 | Tool | Purpose |
 |------|---------|
-| `postmd_create_document` | Publish Markdown, get `docCode` + share URL |
+| `postmd_create_document` | **hosted.** Publish Markdown, get `docCode` + share URL |
 | `postmd_create_document_from_file` | Same, but this server reads a local `filePath` (large files) |
-| `postmd_get_document` | Metadata by `docCode` |
-| `postmd_get_document_raw` | Stored Markdown body (optional `password`) |
+| `postmd_get_document` | **hosted.** Metadata by `docCode` |
+| `postmd_get_document_raw` | **hosted.** Stored Markdown body (optional `password`) |
 
 Managing documents — key with `documents:write`:
 
@@ -42,9 +62,9 @@ Each of the first three also accepts `controlToken` instead of a key, for a docu
 
 | Tool | Purpose |
 |------|---------|
-| `postmd_update_document` | Replace content and/or metadata; can clear password / end date |
+| `postmd_update_document` | **hosted** with `controlToken`. Replace content and/or metadata; can clear password / end date |
 | `postmd_update_document_from_file` | Same, body read from a local `filePath` |
-| `postmd_delete_document` | Delete a document (no undo) |
+| `postmd_delete_document` | **hosted** with `controlToken`. Delete a document (no undo) |
 | `postmd_upload_attachment` | Upload an image/PDF, get a URL to embed in Markdown |
 | `postmd_create_documents_from_files` | Bulk-publish several `.md` files in one call |
 | `postmd_move_document_to_group` | Move a document into a group / folder |
@@ -104,6 +124,32 @@ Run it by hand only to check that it starts — it speaks MCP over stdin and std
 will sit there waiting for a client.
 
 ## Client configuration
+
+### Hosted
+
+Claude Code:
+
+```bash
+claude mcp add --transport http postmd https://postmd.turink.com/mcp
+```
+
+Clients that take a JSON config:
+
+```json
+{
+  "mcpServers": {
+    "PostMD": {
+      "type": "http",
+      "url": "https://postmd.turink.com/mcp"
+    }
+  }
+}
+```
+
+In ChatGPT, add it under **Settings → Apps**; in claude.ai, under **Settings → Connectors**.
+There is nothing to authorize.
+
+### Local
 
 Claude Code:
 
