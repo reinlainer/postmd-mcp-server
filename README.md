@@ -1,14 +1,14 @@
 # PostMD MCP Server
 
-[Model Context Protocol](https://modelcontextprotocol.io) server for **[PostMD](https://postmd.turink.com)** — publish a Markdown document, get a web page you share by link. Run it locally over stdio, or point your client at the hosted server and install nothing. Optional groups, document passwords, share expiry and viewer themes. This server wraps PostMD's public API (`/api/v1`) so assistants can publish, read, update and organize documents.
+[Model Context Protocol](https://modelcontextprotocol.io) server for **[PostMD](https://postmd.turink.com)** — publish a Markdown document, get a web page you share by link. Optional groups, document passwords, share expiry and viewer themes. This server wraps PostMD's public API (`/api/v1`) so assistants can publish, read, update and organize documents.
 
-**Publishing needs no account and no key.** With zero configuration this server can already turn Markdown into a shareable page. An API key adds management: updating and deleting your documents, attachments, and groups.
+**Publishing needs no account and no key.** With zero configuration this server can already turn Markdown into a shareable page, and the hosted server at `https://postmd.turink.com/mcp` needs no install either. An API key adds management: updating and deleting your documents, attachments, and groups.
 
 **Anonymous documents come with a control token.** Publishing without a key returns `data.controlToken` and `data.retainedUntil`: the document is deleted at that instant, and the token is the only way to update or delete it before then. It is shown once and cannot be reissued, so keep it with the `docCode`. Pass it as `controlToken` to the update and delete tools and they work without an API key.
 
 **HTTP reference:** [postmd.turink.com/docs/api](https://postmd.turink.com/docs/api) · machine-readable spec at [/api-docs](https://postmd.turink.com/api-docs)
 
-## Two ways to run it
+## Hosted or local
 
 | | Hosted | Local |
 |---|---|---|
@@ -18,17 +18,9 @@
 | API key | not accepted | optional, for the management tools |
 | Clients | any, including web-only ones such as ChatGPT and claude.ai | any that can run a local process |
 
-The hosted server has no way to receive an API key, so it carries only the tools that
-need none: publishing, reading, and the update and delete that an anonymous publisher
-performs with the `controlToken` returned at publish time. Attachments, groups, notes and
-the tools that read a file from your disk are local-only.
-
-## Requirements
-
-The hosted server needs nothing at all. To run it locally:
-
-- **Node.js** 20 or later
-- Nothing else. An **API key** (`pmk_…`) only for the management tools.
+The hosted server has no way to receive an API key, so it carries only the tools that need
+none. Attachments, groups, notes and the tools that read a file from your disk are
+local-only.
 
 ## Configuration
 
@@ -44,17 +36,18 @@ Load order: this repo's `.env` (if present) is applied via `dotenv` without over
 
 ## Tools
 
-The five marked **hosted** are the ones the hosted server carries. Every tool below works
-on the local server.
+Every tool below works on the local server. The hosted server carries five of them:
+`postmd_create_document`, `postmd_get_document`, `postmd_get_document_raw`, and — with a
+`controlToken` instead of a key — `postmd_update_document` and `postmd_delete_document`.
 
 Publishing and reading — no key needed:
 
 | Tool | Purpose |
 |------|---------|
-| `postmd_create_document` | **hosted.** Publish Markdown, get `docCode` + share URL |
+| `postmd_create_document` | Publish Markdown, get `docCode` + share URL |
 | `postmd_create_document_from_file` | Same, but this server reads a local `filePath` (large files) |
-| `postmd_get_document` | **hosted.** Metadata by `docCode` |
-| `postmd_get_document_raw` | **hosted.** Stored Markdown body (optional `password`) |
+| `postmd_get_document` | Metadata by `docCode` |
+| `postmd_get_document_raw` | Stored Markdown body (optional `password`) |
 
 Managing documents — key with `documents:write`:
 
@@ -62,9 +55,9 @@ Each of the first three also accepts `controlToken` instead of a key, for a docu
 
 | Tool | Purpose |
 |------|---------|
-| `postmd_update_document` | **hosted** with `controlToken`. Replace content and/or metadata; can clear password / end date |
+| `postmd_update_document` | Replace content and/or metadata; can clear password / end date |
 | `postmd_update_document_from_file` | Same, body read from a local `filePath` |
-| `postmd_delete_document` | **hosted** with `controlToken`. Delete a document (no undo) |
+| `postmd_delete_document` | Delete a document (no undo) |
 | `postmd_upload_attachment` | Upload an image/PDF, get a URL to embed in Markdown |
 | `postmd_create_documents_from_files` | Bulk-publish several `.md` files in one call |
 | `postmd_move_document_to_group` | Move a document into a group / folder |
@@ -112,17 +105,6 @@ Groups — key with `groups:read` / `groups:write`:
 
 For uploads: either pass the full Markdown as the `markdown` argument, or pass a local `filePath` only so this server reads the file. The path must exist on the machine running the MCP server.
 
-## Quickstart
-
-Nothing to install. `npx` fetches the package and the MCP client spawns it.
-
-```bash
-npx -y postmd-mcp-server
-```
-
-Run it by hand only to check that it starts — it speaks MCP over stdin and stdout, so it
-will sit there waiting for a client.
-
 ## Client configuration
 
 ### Hosted
@@ -150,6 +132,8 @@ In ChatGPT, add it under **Settings → Apps**; in claude.ai, under **Settings �
 There is nothing to authorize.
 
 ### Local
+
+There is nothing to install: `npx` fetches the package and the client spawns it.
 
 Claude Code:
 
@@ -182,6 +166,9 @@ claude mcp add postmd-dev -- node "$PWD/src/index.js"
 ```
 
 Leave `env` out entirely for publish/read-only use. `cp .env.example .env` works too — the server loads its own `.env`.
+
+Running `npx -y postmd-mcp-server` by hand only checks that it starts. It speaks MCP over
+stdin and stdout, so it will sit there waiting for a client.
 
 ## Smoke test
 
