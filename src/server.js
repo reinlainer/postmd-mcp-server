@@ -19,7 +19,6 @@ import process from "node:process";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createRequire } from "node:module";
-import { openInBrowser, servePreviewFile, viewerUrl } from "./preview.js";
 
 /**
  * 손으로 적어 두면 어긋난다. 실제로 package.json 이 2.3.0 일 때 여기가 2.2.0 이어서
@@ -39,12 +38,7 @@ const INSTRUCTIONS_LOCAL =
   "itself. A successful create returns data.shareUrl — hand that URL to people. " +
   "Creating without a key also returns data.controlToken and data.retainedUntil: the " +
   "document is deleted at that instant, and the token is the only way to update or " +
-  "delete it. It is shown once, so report it to the person along with the URL. " +
-  "When the person has not yet seen the rendered result, do not publish first: call " +
-  "postmd_preview_document with the file path. It opens the file in the PostMD viewer " +
-  "on their own browser without uploading anything, and the page follows every save you " +
-  "make to the file. Publish once they confirm, or leave it to the Upload button in that " +
-  "viewer.";
+  "delete it. It is shown once, so report it to the person along with the URL.";
 
 /**
  * 원격에는 키를 건네줄 길이 없고 서버 기계에 사용자의 파일도 없다. 그래서 그 둘을 말하지
@@ -391,9 +385,7 @@ const TOOL_DEFS = [
     description:
       "Same as postmd_create_document, but reads the Markdown from filePath on the machine " +
       "running this MCP server — use it for large files instead of pasting the body. " +
-      "Without an API key it returns data.controlToken and data.retainedUntil, same as above. " +
-      "If the person has not seen the rendered file yet, call postmd_preview_document first " +
-      "and publish after they confirm.",
+      "Without an API key it returns data.controlToken and data.retainedUntil, same as above.",
     annotations: { title: "Publish document from file", destructiveHint: false },
     inputSchema: {
       type: "object",
@@ -744,71 +736,12 @@ const TOOL_DEFS = [
       required: ["groupId"],
     },
   },
-  {
-    name: "postmd_preview_document",
-    description:
-      "Show a local .md file in the PostMD viewer WITHOUT uploading it. This server serves " +
-      "the file on 127.0.0.1 and opens https://…/local-viewer?src=… in the person's default " +
-      "browser; the page re-renders within a second of every save, so edit the file and let " +
-      "them watch. Nothing leaves their machine. The first time, Chrome asks them to allow " +
-      "this site to reach the local network — tell them to click Allow. Pass docCode when " +
-      "the file was already published, so the viewer's Upload button offers to replace that " +
-      "document. The preview lives as long as this MCP server process. Use this before " +
-      "postmd_create_document_from_file whenever the person has not seen the result yet.",
-    annotations: { title: "Preview a local file in the viewer", destructiveHint: false, readOnlyHint: true },
-    inputSchema: {
-      type: "object",
-      properties: {
-        filePath: {
-          type: "string",
-          description: "Path to a .md file on the MCP server host. Prefer an absolute path.",
-        },
-        docCode: {
-          type: "string",
-          description: "Optional. The document this file was published as; the viewer then defaults to replacing it.",
-        },
-        open: {
-          type: "boolean",
-          description: "Open the viewer in the default browser. Default true. Set false to only get the URL.",
-        },
-      },
-      required: ["filePath"],
-    },
-  },
 ];
 
 async function runTool(ctx, name, args) {
   const a = args && typeof args === "object" ? args : {};
 
   switch (name) {
-    case "postmd_preview_document": {
-      try {
-        const { fileUrl, name: fileName } = await servePreviewFile(a.filePath, ctx.base);
-        const url = viewerUrl(ctx.base, fileUrl, a.docCode);
-        const opened = a.open === false ? false : openInBrowser(url);
-        return textOk(
-          JSON.stringify(
-            {
-              resultCode: "200",
-              data: {
-                viewerUrl: url,
-                fileName,
-                openedInBrowser: opened,
-                note:
-                  "The viewer re-renders the file within a second of each save. If the page " +
-                  "stays empty, the browser is asking the person to allow local network access " +
-                  "next to the address bar. Nothing is uploaded until they press Upload or you " +
-                  "call a publish tool.",
-              },
-            },
-            null,
-            2
-          )
-        );
-      } catch (e) {
-        return textErr(e instanceof Error ? e.message : String(e));
-      }
-    }
     case "postmd_create_document": {
       if (typeof a.markdown !== "string" || a.markdown.length === 0) {
         return textErr("markdown is required: the full document source as one string.");
