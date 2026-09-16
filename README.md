@@ -46,6 +46,7 @@ Publishing and reading — no key needed:
 |------|---------|
 | `postmd_create_document` | Publish Markdown, get `docCode` + share URL |
 | `postmd_create_document_from_file` | Same, but this server reads a local `filePath` (large files) |
+| `postmd_preview_document` | Show a local `.md` in the PostMD viewer without uploading it; the page re-renders as the file changes (local server only) |
 | `postmd_get_document` | Metadata by `docCode` |
 | `postmd_get_document_raw` | Stored Markdown body (optional `password`) |
 
