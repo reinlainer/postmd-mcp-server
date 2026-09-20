@@ -1,10 +1,10 @@
 # PostMD MCP Server
 
-[Model Context Protocol](https://modelcontextprotocol.io) server for **[PostMD](https://postmd.turink.com)** — publish a Markdown document, get a web page you share by link. Optional groups, document passwords, share expiry and viewer themes. This server wraps PostMD's public API (`/api/v1`) so assistants can publish, read, update and organize documents.
+[Model Context Protocol](https://modelcontextprotocol.io) server for **[PostMD](https://postmd.turink.com)** — publish a Markdown document, get a web page you share by link. Optional groups, document passwords, and viewer themes. This server wraps PostMD's public API (`/api/v1`) so assistants can publish, read, update and organize documents.
 
-**Publishing needs no account and no key.** With zero configuration this server can already turn Markdown into a shareable page, and the hosted server at `https://postmd.turink.com/mcp` needs no install either. An API key adds management: updating and deleting your documents, attachments, and groups.
+**Publishing needs no account and no key.** With zero configuration this server can already turn Markdown into a shareable page, and the hosted server at `https://postmd.turink.com/mcp` needs no install either. An API key adds management: organizing documents in groups, and notes.
 
-**Anonymous documents come with a control token.** Publishing without a key returns `data.controlToken` and `data.retainedUntil`: the document is deleted at that instant, and the token is the only way to update or delete it before then. It is shown once and cannot be reissued, so keep it with the `docCode`. Pass it as `controlToken` to the update and delete tools and they work without an API key.
+**30-day retention.** Documents have a 30-day retention period (`data.retainedUntil`) that extends by 30 days whenever the document is read (at most once per day). Documents without a password can be updated or deleted by anyone; password-protected documents require the password or the owner's API key.
 
 **HTTP reference:** [postmd.turink.com/docs/api](https://postmd.turink.com/docs/api) · machine-readable spec at [/api-docs](https://postmd.turink.com/api-docs)
 
@@ -14,13 +14,12 @@
 |---|---|---|
 | Address | `https://postmd.turink.com/mcp` | `npx -y postmd-mcp-server` |
 | Needs | nothing | Node.js 20 or later |
-| Tools | 5 | all 21 |
-| API key | not accepted | optional, for the management tools |
+| Tools | 5 | all 20 |
+| API key | not accepted | optional, for member-scoped tools |
 | Clients | any, including web-only ones such as ChatGPT and claude.ai | any that can run a local process |
 
 The hosted server has no way to receive an API key, so it carries only the tools that need
-none. Attachments, groups, notes and the tools that read a file from your disk are
-local-only.
+none. Groups, notes and the tools that read a file from your disk are local-only.
 
 ## Configuration
 
@@ -37,8 +36,7 @@ Load order: this repo's `.env` (if present) is applied via `dotenv` without over
 ## Tools
 
 Every tool below works on the local server. The hosted server carries five of them:
-`postmd_create_document`, `postmd_get_document`, `postmd_get_document_raw`, and — with a
-`controlToken` instead of a key — `postmd_update_document` and `postmd_delete_document`.
+`postmd_create_document`, `postmd_get_document`, `postmd_get_document_raw`, `postmd_update_document`, and `postmd_delete_document`.
 
 Publishing and reading — no key needed:
 
@@ -49,18 +47,15 @@ Publishing and reading — no key needed:
 | `postmd_get_document` | Metadata by `docCode` |
 | `postmd_get_document_raw` | Stored Markdown body (optional `password`) |
 
-Managing documents — key with `documents:write`:
-
-Each of the first three also accepts `controlToken` instead of a key, for a document published anonymously.
+Managing documents — key with `documents:write` (or password / no credential for unowned documents without password):
 
 | Tool | Purpose |
 |------|---------|
-| `postmd_update_document` | Replace content and/or metadata; can clear password / end date |
+| `postmd_update_document` | Replace content and/or metadata; can clear password |
 | `postmd_update_document_from_file` | Same, body read from a local `filePath` |
 | `postmd_delete_document` | Delete a document (no undo) |
-| `postmd_upload_attachment` | Upload an image/PDF, get a URL to embed in Markdown |
 | `postmd_create_documents_from_files` | Bulk-publish several `.md` files in one call |
-| `postmd_move_document_to_group` | Move a document into a group / folder |
+| `postmd_move_document_to_group` | Move a document into a group |
 
 ### Replacing content on a document that has notes
 
@@ -100,7 +95,7 @@ Groups — key with `groups:read` / `groups:write`:
 | `postmd_list_groups` | Groups visible to the key (paged) |
 | `postmd_list_group_documents` | Documents in a group (paged, searchable, sortable) |
 | `postmd_create_group` | New group |
-| `postmd_update_group` | Rename / change expiry |
+| `postmd_update_group` | Rename group |
 | `postmd_delete_group` | Delete a group (documents survive) |
 
 For uploads: either pass the full Markdown as the `markdown` argument, or pass a local `filePath` only so this server reads the file. The path must exist on the machine running the MCP server.
@@ -179,7 +174,7 @@ export POSTMD_API_KEY=pmk_…
 npm run smoke
 ```
 
-Creates a group and a passworded document, reads it back, updates it, clears the password, then deletes both. It also publishes one document with no credential and removes it with the control token.
+Creates a group and a passworded document, reads it back, updates it, clears the password, then deletes both. It also publishes one document with no credential and removes it without a token.
 
 ## Stack
 

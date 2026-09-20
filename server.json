@@ -24,7 +24,7 @@
         },
         {
           "name": "POSTMD_API_KEY",
-          "description": "Needed only for managing documents, attachments and groups. Publishing and reading work without it.",
+          "description": "Needed only for managing documents and groups. Publishing and reading work without it.",
           "isRequired": false,
           "isSecret": true
         },

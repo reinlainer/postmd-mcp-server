@@ -32,13 +32,11 @@ const DEFAULT_BASE_URL = "https://postmd.turink.com";
 /** initialize 때 클라이언트에 전달되어, 모델이 도구를 고르기 전에 읽는다. */
 const INSTRUCTIONS_LOCAL =
   "PostMD publishes Markdown as web pages. Use the postmd_* tools instead of calling " +
-  "the HTTP API directly. Creating a document needs no API key; updating, deleting, " +
-  "attachments and groups need POSTMD_API_KEY with the matching scope. Pass the full " +
-  "Markdown in `markdown`, or pass a local `filePath` so this server reads the file " +
-  "itself. A successful create returns data.shareUrl — hand that URL to people. " +
-  "Creating without a key also returns data.controlToken and data.retainedUntil: the " +
-  "document is deleted at that instant, and the token is the only way to update or " +
-  "delete it. It is shown once, so report it to the person along with the URL.";
+  "the HTTP API directly. Documents are kept for 30 days from publication or their last read. " +
+  "Documents without a password can be updated or deleted by anyone; password-protected " +
+  "documents require the password or the owner's API key. Pass the full Markdown in " +
+  "`markdown`, or pass a local `filePath` so this server reads the file itself. A successful " +
+  "create returns data.shareUrl — hand that URL to people.";
 
 /**
  * 원격에는 키를 건네줄 길이 없고 서버 기계에 사용자의 파일도 없다. 그래서 그 둘을 말하지
@@ -46,12 +44,11 @@ const INSTRUCTIONS_LOCAL =
  */
 const INSTRUCTIONS_REMOTE =
   "PostMD publishes Markdown as web pages. Use the postmd_* tools instead of calling " +
-  "the HTTP API directly. Nothing here needs an account, a sign-in or an API key. Pass " +
-  "the full Markdown in `markdown`. A successful create returns data.shareUrl - hand " +
-  "that URL to people. It also returns data.controlToken and data.retainedUntil: the " +
-  "document is deleted at that instant, and the token is the only way to update or " +
-  "delete it before then. It is shown once and cannot be reissued, so report it to the " +
-  "person along with the URL, and pass it back as `controlToken` to update or delete.";
+  "the HTTP API directly. Nothing here needs an account, a sign-in or an API key. " +
+  "Documents are kept for 30 days from publication or their last read. Documents without a " +
+  "password can be updated or deleted by anyone. If a document has a password, provide it to " +
+  "update or delete. Pass the full Markdown in `markdown`. A successful create returns " +
+  "data.shareUrl - hand that URL to people.";
 
 /**
  * 원격에서 여는 도구. 자격 증명 없이 끝까지 가는 것만 남겼다 - 발행과 조회, 그리고 발행할
@@ -61,7 +58,7 @@ const INSTRUCTIONS_REMOTE =
  * 실패하고, `filePath` 를 받는 도구는 그 파일이 이 서버가 도는 기계에 없다.
  *
  * 목록에 적은 것만 열린다. 새 도구가 생겨도 여기 이름을 적기 전에는 원격으로 나가지
- * 않는다 - 반대로 두면 키가 필요한 도구가 조용히 딸려 나간다.
+ * 않는다. 반대로 두면 키가 필요한 도구가 의도치 않게 외부에 노출된다.
  */
 const REMOTE_TOOLS = new Set([
   "postmd_create_document",
@@ -141,10 +138,8 @@ function missingKey(ctx, scopes) {
   if (ctx.key) return null;
   if (ctx.remote) {
     return textErr(
-      "This server has no way to receive an API key. Pass `controlToken` instead — the " +
-        "token returned when the document was published, which is what an anonymous " +
-        "publisher uses to change or remove it. For the key-based tools, run the local " +
-        "server: npx -y postmd-mcp-server, with POSTMD_API_KEY set."
+      "This tool requires an API key, which cannot be passed to the remote server. " +
+        "Run the local server: npx -y postmd-mcp-server, with POSTMD_API_KEY set."
     );
   }
   return textErr(
@@ -219,17 +214,6 @@ async function readLocalFile(filePath) {
 }
 
 /** 첨부는 서버가 확장자로 받아 준다. Content-Type 은 예의상 맞춰 보낸다. */
-const ATTACHMENT_MIME = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
-  svg: "image/svg+xml",
-  bmp: "image/bmp",
-  pdf: "application/pdf",
-};
-
 /**
  * 만든 문서에는 나눠 줄 주소를 붙여 준다. 에이전트의 다음 행동이 바로 그것이다.
  *
@@ -254,7 +238,6 @@ function documentForm(a, markdownBuffer) {
   }
   if (a.title != null) form.append("title", String(a.title));
   if (a.password != null) form.append("password", String(a.password));
-  if (a.shareEndDate != null) form.append("shareEndDate", String(a.shareEndDate));
   if (a.viewerStyle != null) form.append("viewerStyle", String(a.viewerStyle));
   return form;
 }
@@ -267,10 +250,14 @@ async function createDocument(ctx, a, markdownBuffer) {
   return fromEnvelope(r);
 }
 
+function passwordHeader(a) {
+  const pwd = a.currentPassword ?? a.password;
+  return pwd ? { "X-Document-Password": String(pwd) } : {};
+}
+
 async function updateDocument(ctx, a, markdownBuffer) {
   const form = documentForm(a, markdownBuffer);
   if (a.clearPassword === true) form.append("clearPassword", "true");
-  if (a.clearShareEndDate === true) form.append("clearShareEndDate", "true");
   if ([...form.keys()].length === 0) {
     return textErr("Nothing to update: pass new markdown, or at least one metadata field.");
   }
@@ -291,18 +278,12 @@ async function updateDocument(ctx, a, markdownBuffer) {
   }
   const r = await apiFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/update`, {
     method: "POST",
-    headers: tokenHeader(a),
+    headers: passwordHeader(a),
     body: form,
   });
   return fromEnvelope(r);
 }
 
-/**
- * 익명 발행 문서의 제어 토큰 인자.
- *
- * 키를 대신하는 것이 아니라 그 문서 하나에만 듣는다. 그래서 키가 없어도 이 값이 있으면
- * 도구를 부를 수 있고, 키가 있어도 남의 익명 문서에는 이 값이 있어야 한다.
- */
 const NOTES_ON_REPLACE_PROP = {
   type: "string",
   enum: ["keep", "abort"],
@@ -314,35 +295,9 @@ const NOTES_ON_REPLACE_PROP = {
     "anchored to its text, and the answer says how many.",
 };
 
-const CONTROL_TOKEN_PROP = {
-  type: "string",
-  description:
-    "Control token from an anonymous publish answer (pmt_...). Lets you act on that one " +
-    "document without an API key.",
-};
-
-/** 제어 토큰을 헤더로 옮긴다. 서버는 회원 인증 헤더와 나눠서 받는다. */
-function tokenHeader(a) {
-  return a.controlToken ? { "X-Document-Token": String(a.controlToken) } : {};
-}
-
-/**
- * 키가 없어도 제어 토큰이 있으면 통과시킨다.
- *
- * 토큰만으로 되는 일에 키를 요구하면, 방금 익명으로 발행하고 토큰을 받은 쪽이 자기 문서를
- * 손대지 못한다.
- */
-function missingKeyUnlessToken(ctx, a, scopes) {
-  return a.controlToken ? null : missingKey(ctx, scopes);
-}
-
 /** 문서 메타데이터 공통 속성. 만들기·고치기 스키마가 나눠 쓴다. */
 const DOC_META_PROPS = {
   password: { type: "string", description: "Readers must supply this password to see the content." },
-  shareEndDate: {
-    type: "string",
-    description: "yyyyMMdd. The document stops being served after this date. Omit for no end date.",
-  },
   viewerStyle: {
     type: "string",
     description:
@@ -355,12 +310,11 @@ const TOOL_DEFS = [
     name: "postmd_create_document",
     description:
       "Publish Markdown as a PostMD web page. No API key required — anyone can publish. " +
-      "Returns docCode and data.shareUrl; hand shareUrl to people. Without a key the " +
-      "document is anonymous: data.retainedUntil is when it is deleted and " +
-      "data.controlToken is the only way to update or delete it, shown once and never " +
-      "reissued — report both to the person. With an API key the document belongs to that " +
-      "member, has no expiry, needs no token and can collect notes; groupId files it into " +
-      "that group instead of the default one (key with documents:write).",
+      "Returns docCode and data.shareUrl; hand shareUrl to people. Documents have a " +
+      "30-day retention period (data.retainedUntil) that extends on each read. Documents " +
+      "without a password can be updated or deleted by anyone; password-protected documents " +
+      "require the password or the owner's API key. With an API key the document belongs to " +
+      "that member; groupId files it into that group (key with documents:write).",
     annotations: { title: "Publish document", destructiveHint: false },
     inputSchema: {
       type: "object",
@@ -384,8 +338,7 @@ const TOOL_DEFS = [
     name: "postmd_create_document_from_file",
     description:
       "Same as postmd_create_document, but reads the Markdown from filePath on the machine " +
-      "running this MCP server — use it for large files instead of pasting the body. " +
-      "Without an API key it returns data.controlToken and data.retainedUntil, same as above.",
+      "running this MCP server — use it for large files instead of pasting the body.",
     annotations: { title: "Publish document from file", destructiveHint: false },
     inputSchema: {
       type: "object",
@@ -426,7 +379,7 @@ const TOOL_DEFS = [
   {
     name: "postmd_get_document",
     description:
-      "Get document metadata by docCode: title, fileName, hasPassword, shareEndDate, " +
+      "Get document metadata by docCode: title, fileName, hasPassword, " +
       "viewerStyle, timestamps. Public — no API key needed. Content is not included; " +
       "use postmd_get_document_raw for the Markdown source.",
     annotations: { title: "Get document info", readOnlyHint: true },
@@ -440,7 +393,7 @@ const TOOL_DEFS = [
     name: "postmd_get_document_raw",
     description:
       "Get the stored Markdown source of a document. Public — no API key needed. " +
-      "Password-protected documents need `password`; expired documents cannot be read.",
+      "Password-protected documents need `password`.",
     annotations: { title: "Get document source", readOnlyHint: true },
     inputSchema: {
       type: "object",
@@ -454,11 +407,10 @@ const TOOL_DEFS = [
   {
     name: "postmd_update_document",
     description:
-      "Update a document. Requires an API key with documents:write for a document you own, " +
-      "or `controlToken` for an anonymously published one. Include `markdown` to replace " +
-      "the stored content; any metadata field replaces that field. clearPassword / " +
-      "clearShareEndDate remove the password / end date. Updating does not push back the " +
-      "deletion date of an anonymous document. Replacing the content requires notesOnReplace.",
+      "Update a document. Password-protected documents require the password or the owner's API key; " +
+      "documents without a password can be updated by anyone. Include `markdown` to replace " +
+      "the stored content; any metadata field replaces that field. clearPassword removes the password. " +
+      "Replacing the content requires notesOnReplace.",
     annotations: { title: "Update document", destructiveHint: true },
     inputSchema: {
       type: "object",
@@ -471,10 +423,12 @@ const TOOL_DEFS = [
         title: { type: "string" },
         fileName: { type: "string", description: "Upload filename when replacing content. Default document.md." },
         ...DOC_META_PROPS,
+        currentPassword: {
+          type: "string",
+          description: "Current password to authenticate if the document is password-protected.",
+        },
         clearPassword: { type: "boolean", description: "true removes the password." },
-        clearShareEndDate: { type: "boolean", description: "true removes the end date, making sharing open-ended." },
         notesOnReplace: NOTES_ON_REPLACE_PROP,
-        controlToken: CONTROL_TOKEN_PROP,
       },
       required: ["docCode"],
     },
@@ -483,7 +437,7 @@ const TOOL_DEFS = [
     name: "postmd_update_document_from_file",
     description:
       "Same as postmd_update_document, but reads the new Markdown from filePath on the " +
-      "machine running this MCP server. Takes `controlToken` the same way.",
+      "machine running this MCP server.",
     annotations: { title: "Update document from file", destructiveHint: true },
     inputSchema: {
       type: "object",
@@ -496,10 +450,12 @@ const TOOL_DEFS = [
         title: { type: "string" },
         fileName: { type: "string", description: "Upload filename. Defaults to the basename of filePath." },
         ...DOC_META_PROPS,
+        currentPassword: {
+          type: "string",
+          description: "Current password to authenticate if the document is password-protected.",
+        },
         clearPassword: { type: "boolean", description: "true removes the password." },
-        clearShareEndDate: { type: "boolean", description: "true removes the end date, making sharing open-ended." },
         notesOnReplace: NOTES_ON_REPLACE_PROP,
-        controlToken: CONTROL_TOKEN_PROP,
       },
       required: ["docCode", "filePath", "notesOnReplace"],
     },
@@ -507,35 +463,19 @@ const TOOL_DEFS = [
   {
     name: "postmd_delete_document",
     description:
-      "Delete a document. Requires an API key with documents:write for a document you own, " +
-      "or `controlToken` for an anonymously published one. There is no endpoint to undo " +
-      "this: the document stops being served at once and its stored content is erased about " +
-      "a month later.",
+      "Delete a document. Password-protected documents require the password or the owner's API key; " +
+      "documents without a password can be deleted by anyone.",
     annotations: { title: "Delete document", destructiveHint: true },
     inputSchema: {
       type: "object",
-      properties: { docCode: { type: "string" }, controlToken: CONTROL_TOKEN_PROP },
-      required: ["docCode"],
-    },
-  },
-  {
-    name: "postmd_upload_attachment",
-    description:
-      "Upload an image or PDF to reference from a document. Requires an API key with " +
-      "documents:write. Allowed types: png, jpg, jpeg, gif, webp, svg, bmp, pdf. Use the " +
-      "returned data.url as the image/link target in your Markdown, then publish the " +
-      "Markdown with postmd_create_document.",
-    annotations: { title: "Upload attachment", destructiveHint: false },
-    inputSchema: {
-      type: "object",
       properties: {
-        filePath: {
+        docCode: { type: "string" },
+        password: {
           type: "string",
-          description: "Path to the file on the MCP server host. Prefer an absolute path.",
+          description: "Document password if the document has one and you are not authenticated as its owner.",
         },
-        fileName: { type: "string", description: "Upload filename. Defaults to the basename of filePath." },
       },
-      required: ["filePath"],
+      required: ["docCode"],
     },
   },
   {
@@ -662,8 +602,6 @@ const TOOL_DEFS = [
       type: "object",
       properties: {
         groupId: { type: "number" },
-        folderId: { type: "number", description: "Only documents filed in this folder." },
-        rootOnly: { type: "boolean", description: "true → only documents not in any folder." },
         q: { type: "string", description: "Search text for title and file name." },
         sort: {
           type: "string",
@@ -678,16 +616,14 @@ const TOOL_DEFS = [
   {
     name: "postmd_move_document_to_group",
     description:
-      "Move a document you own into a group you can use, optionally into a folder of that " +
-      "group. A document belongs to exactly one group, so this replaces its current group. " +
-      "Requires an API key with documents:write.",
+      "Move a document you own into a group. A document belongs to exactly one group, so this " +
+      "replaces its current group. Requires an API key with documents:write.",
     annotations: { title: "Move document to a group", destructiveHint: false },
     inputSchema: {
       type: "object",
       properties: {
         docCode: { type: "string" },
         groupId: { type: "number" },
-        folderId: { type: "number", description: "File it into this folder of that group." },
       },
       required: ["docCode", "groupId"],
     },
@@ -695,14 +631,12 @@ const TOOL_DEFS = [
   {
     name: "postmd_create_group",
     description:
-      "Create a group. Requires an API key with groups:write. Documents can then be filed " +
-      "into it and members invited from the web app.",
+      "Create a group. Requires an API key with groups:write. Documents can then be filed into it.",
     annotations: { title: "Create group", destructiveHint: false },
     inputSchema: {
       type: "object",
       properties: {
         name: { type: "string" },
-        expireDate: { type: "string", description: "yyyyMMdd. The group stops working after this date." },
       },
       required: ["name"],
     },
@@ -710,16 +644,13 @@ const TOOL_DEFS = [
   {
     name: "postmd_update_group",
     description:
-      "Rename a group or change its expiry. Owner only. Requires an API key with " +
-      "groups:write. clearExpireDate removes the expiry.",
+      "Rename a group. Owner only. Requires an API key with groups:write.",
     annotations: { title: "Update group", destructiveHint: false },
     inputSchema: {
       type: "object",
       properties: {
         groupId: { type: "number" },
         name: { type: "string" },
-        expireDate: { type: "string", description: "yyyyMMdd." },
-        clearExpireDate: { type: "boolean", description: "true removes the expiry date." },
       },
       required: ["groupId"],
     },
@@ -772,7 +703,6 @@ async function runTool(ctx, name, args) {
         return textErr(e instanceof Error ? e.message : String(e));
       }
       if (a.password != null) form.append("password", String(a.password));
-      if (a.shareEndDate != null) form.append("shareEndDate", String(a.shareEndDate));
       if (a.viewerStyle != null) form.append("viewerStyle", String(a.viewerStyle));
       if (a.groupId != null) form.append("groupId", String(a.groupId));
       const r = await apiFetch(ctx, "/documents/bulk", { method: "POST", body: form });
@@ -802,13 +732,9 @@ async function runTool(ctx, name, args) {
       }
     }
     case "postmd_update_document": {
-      const denied = missingKeyUnlessToken(ctx, a, "documents:write");
-      if (denied) return denied;
       return await updateDocument(ctx, a, a.markdown ?? null);
     }
     case "postmd_update_document_from_file": {
-      const denied = missingKeyUnlessToken(ctx, a, "documents:write");
-      if (denied) return denied;
       try {
         const { buffer, suggestedName } = await readLocalFile(a.filePath);
         return await updateDocument(ctx, { ...a, fileName: a.fileName ?? suggestedName }, buffer);
@@ -817,29 +743,11 @@ async function runTool(ctx, name, args) {
       }
     }
     case "postmd_delete_document": {
-      const denied = missingKeyUnlessToken(ctx, a, "documents:write");
-      if (denied) return denied;
       const r = await apiFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/delete`, {
         method: "POST",
-        headers: tokenHeader(a),
+        headers: passwordHeader(a),
       });
       return fromEnvelope(r);
-    }
-    case "postmd_upload_attachment": {
-      const denied = missingKey(ctx, "documents:write");
-      if (denied) return denied;
-      try {
-        const { buffer, suggestedName } = await readLocalFile(a.filePath);
-        const fileName = a.fileName || suggestedName;
-        const ext = path.extname(fileName).slice(1).toLowerCase();
-        const mime = ATTACHMENT_MIME[ext] || "application/octet-stream";
-        const form = new FormData();
-        form.append("file", new Blob([buffer], { type: mime }), fileName);
-        const r = await apiFetch(ctx, "/documents/uploads", { method: "POST", body: form });
-        return fromEnvelope(r);
-      } catch (e) {
-        return textErr(e instanceof Error ? e.message : String(e));
-      }
     }
     case "postmd_list_notes": {
       const denied = missingKey(ctx, "documents:read");
@@ -922,8 +830,6 @@ async function runTool(ctx, name, args) {
       const denied = missingKey(ctx, "groups:read and documents:read");
       if (denied) return denied;
       const qs = query({
-        folderId: a.folderId,
-        rootOnly: a.rootOnly,
         q: a.q,
         sort: a.sort,
         page: a.page,
@@ -936,7 +842,6 @@ async function runTool(ctx, name, args) {
       const denied = missingKey(ctx, "documents:write");
       if (denied) return denied;
       const body = { groupId: a.groupId };
-      if (a.folderId != null) body.folderId = a.folderId;
       const r = await apiFetch(ctx, `/documents/${encodeURIComponent(a.docCode)}/group`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -948,7 +853,6 @@ async function runTool(ctx, name, args) {
       const denied = missingKey(ctx, "groups:write");
       if (denied) return denied;
       const body = { name: a.name };
-      if (a.expireDate != null) body.expireDate = a.expireDate;
       const r = await apiFetch(ctx, "/groups", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -961,8 +865,6 @@ async function runTool(ctx, name, args) {
       if (denied) return denied;
       const body = {};
       if (a.name != null) body.name = a.name;
-      if (a.expireDate != null) body.expireDate = a.expireDate;
-      if (a.clearExpireDate === true) body.clearExpireDate = true;
       const r = await apiFetch(ctx, `/groups/${Number(a.groupId)}/update`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

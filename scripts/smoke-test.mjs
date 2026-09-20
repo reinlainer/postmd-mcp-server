@@ -125,10 +125,9 @@ if (groupId != null) {
 }
 
 /*
-  9. 익명 발행과 제어 토큰.
+  9. 익명 발행 (비밀번호 없는 문서).
 
-  자격 증명을 붙이지 않고 부른다. 키를 실으면 그 회원 소유가 되어 토큰이 나오지 않으므로,
-  여기서만 Authorization 헤더를 뺀다.
+  자격 증명을 붙이지 않고 부른다.
 */
 const anonForm = new FormData();
 anonForm.append(
@@ -141,32 +140,22 @@ const anon = await anonRes.json().catch(() => null);
 check("publish without a credential", anon?.resultCode === "200", JSON.stringify(anon));
 
 const anonCode = anon?.data?.docCode;
-const controlToken = anon?.data?.controlToken;
-check("answer carries a control token", typeof controlToken === "string" && controlToken.startsWith("pmt_"));
-check("answer carries a deletion date", typeof anon?.data?.retainedUntil === "string");
+check("answer carries a retention date", typeof anon?.data?.retainedUntil === "string");
 check("answer explains the terms", typeof anon?.message === "string" && anon.message.length > 0);
 
-if (anonCode && controlToken) {
+if (anonCode) {
   const titled = new FormData();
   titled.append("title", `mcp smoke anon ${stamp}`);
   const changed = await fetch(`${base}/api/v1/documents/${anonCode}/update`, {
     method: "POST",
-    headers: { "X-Document-Token": controlToken },
     body: titled,
   });
-  check("token updates the document", (await changed.json().catch(() => null))?.resultCode === "200");
-
-  const refused = await fetch(`${base}/api/v1/documents/${anonCode}/delete`, {
-    method: "POST",
-    headers: { "X-Document-Token": "pmt_wrong" },
-  });
-  check("a wrong token is refused", (await refused.json().catch(() => null))?.resultCode === "E_DOC_0008");
+  check("anyone can update a document without password", (await changed.json().catch(() => null))?.resultCode === "200");
 
   const removed = await fetch(`${base}/api/v1/documents/${anonCode}/delete`, {
     method: "POST",
-    headers: { "X-Document-Token": controlToken },
   });
-  check("token deletes the document", (await removed.json().catch(() => null))?.resultCode === "200");
+  check("anyone can delete a document without password", (await removed.json().catch(() => null))?.resultCode === "200");
 }
 
 console.log(failures ? `\n${failures} failure(s)` : "\nall good");
