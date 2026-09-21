@@ -57,6 +57,20 @@ Managing documents — key with `documents:write` (or password / no credential f
 | `postmd_create_documents_from_files` | Bulk-publish several `.md` files in one call |
 | `postmd_move_document_to_group` | Move a document into a group |
 
+### Graphs
+
+A PostMD document can carry graph data that the viewer draws in a panel beside the text, showing
+how the parts of the document relate. No tool here creates or edits a graph, because there is no
+endpoint for one: the data sits in the Markdown as an HTML comment and travels with the body.
+
+Adding a graph to an existing document therefore means reading it with `postmd_get_document_raw`,
+inserting the comment, and sending the whole body back with `postmd_update_document`. Publishing a
+new document with a graph is an ordinary `postmd_create_document` call.
+
+The format is at <https://postmd.turink.com/docs/graph>. Working out what the nodes are and how
+they connect requires reading the document, which is the calling agent's part; PostMD only draws
+what it finds.
+
 ### Replacing content on a document that has notes
 
 Notes are located by the text they quote, not by a stored position. Replacing a

@@ -321,7 +321,10 @@ const TOOL_DEFS = [
       properties: {
         markdown: {
           type: "string",
-          description: "Full Markdown document as one UTF-8 string (the entire source, not a summary).",
+          description:
+            "Full Markdown document as one UTF-8 string (the entire source, not a summary). " +
+            "May include graph data in an HTML comment, which the viewer draws beside the text; " +
+            "the format is at /docs/graph.",
         },
         title: {
           type: "string",
@@ -418,7 +421,10 @@ const TOOL_DEFS = [
         docCode: { type: "string" },
         markdown: {
           type: "string",
-          description: "Full new Markdown body as one UTF-8 string. Omit if only metadata changes.",
+          description:
+            "Full new Markdown body as one UTF-8 string. Omit if only metadata changes. " +
+            "Adding or revising a graph means sending the whole body with the graph comment in it; " +
+            "the format is at /docs/graph.",
         },
         title: { type: "string" },
         fileName: { type: "string", description: "Upload filename when replacing content. Default document.md." },
