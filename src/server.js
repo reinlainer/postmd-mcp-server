@@ -36,7 +36,7 @@ const INSTRUCTIONS_LOCAL =
   "Documents without a password can be updated or deleted by anyone; password-protected " +
   "documents require the password or the owner's API key. Pass the full Markdown in " +
   "`markdown`, or pass a local `filePath` so this server reads the file itself. A successful " +
-  "create returns data.shareUrl — hand that URL to people.";
+  "create returns data.shareUrl — hand that URL to people. What else the service can do, and which page describes it, is listed at https://postmd.turink.com/llms.txt — including graph data, which is carried inside the Markdown rather than through a tool.";
 
 /**
  * 원격에는 키를 건네줄 길이 없고 서버 기계에 사용자의 파일도 없다. 그래서 그 둘을 말하지
@@ -48,7 +48,7 @@ const INSTRUCTIONS_REMOTE =
   "Documents are kept for 30 days from publication or their last read. Documents without a " +
   "password can be updated or deleted by anyone. If a document has a password, provide it to " +
   "update or delete. Pass the full Markdown in `markdown`. A successful create returns " +
-  "data.shareUrl - hand that URL to people.";
+  "data.shareUrl - hand that URL to people. What else the service can do, and which page describes it, is listed at https://postmd.turink.com/llms.txt - including graph data, which is carried inside the Markdown rather than through a tool.";
 
 /**
  * 원격에서 여는 도구. 자격 증명 없이 끝까지 가는 것만 남겼다 - 발행과 조회, 그리고 발행할

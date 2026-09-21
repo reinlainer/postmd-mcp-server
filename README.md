@@ -6,7 +6,7 @@
 
 **30-day retention.** Documents have a 30-day retention period (`data.retainedUntil`) that extends by 30 days whenever the document is read (at most once per day). Documents without a password can be updated or deleted by anyone; password-protected documents require the password or the owner's API key.
 
-**HTTP reference:** [postmd.turink.com/docs/api](https://postmd.turink.com/docs/api) · machine-readable spec at [/api-docs](https://postmd.turink.com/api-docs)
+**Where things are written down:** [/llms.txt](https://postmd.turink.com/llms.txt) lists what the service can do and which page answers each thing; it is the place to start. [/docs/api](https://postmd.turink.com/docs/api) is the HTTP reference and [/api-docs](https://postmd.turink.com/api-docs) the machine-readable spec.
 
 ## Hosted or local
 
