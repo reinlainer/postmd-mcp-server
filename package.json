@@ -1,7 +1,7 @@
 {
   "name": "postmd-mcp-server",
   "version": "2.4.0",
-  "description": "MCP server for PostMD — publish Markdown, get a shareable web page",
+  "description": "MCP server for PostMD — publish Markdown as a shareable web page, with document graphs beside the text",
   "mcpName": "io.github.reinlainer/postmd-mcp-server",
   "type": "module",
   "main": "src/index.js",
@@ -25,7 +25,8 @@
     "mcp",
     "postmd",
     "markdown",
-    "publishing"
+    "publishing",
+    "document-graph"
   ],
   "license": "MIT",
   "dependencies": {

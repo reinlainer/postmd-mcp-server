@@ -1,6 +1,6 @@
 # PostMD MCP Server
 
-[Model Context Protocol](https://modelcontextprotocol.io) server for **[PostMD](https://postmd.turink.com)** — publish a Markdown document, get a web page you share by link. Optional groups, document passwords, and viewer themes. This server wraps PostMD's public API (`/api/v1`) so assistants can publish, read, update and organize documents.
+[Model Context Protocol](https://modelcontextprotocol.io) server for **[PostMD](https://postmd.turink.com)** — publish a Markdown document, get a web page you share by link, and add a document graph that the viewer draws beside the text: the reading order, the bodies and rules a document names, a procedure spread over its chapters. Optional groups, document passwords and viewer themes. This server wraps PostMD's public API (`/api/v1`) so assistants can publish, read, update and organize documents.
 
 **Publishing needs no account and no key.** With zero configuration this server can already turn Markdown into a shareable page, and the hosted server at `https://postmd.turink.com/mcp` needs no install either. An API key adds management: organizing documents in groups, and notes.
 
