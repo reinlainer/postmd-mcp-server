@@ -51,8 +51,8 @@ const INSTRUCTIONS_REMOTE =
   "data.shareUrl - hand that URL to people. What else the service can do, and which page describes it, is listed at https://postmd.turink.com/llms.txt - including graph data, which is carried inside the Markdown rather than through a tool.";
 
 /**
- * 원격에서 여는 도구. 자격 증명 없이 끝까지 가는 것만 남겼다 - 발행과 조회, 그리고 발행할
- * 때 받은 제어 토큰으로 하는 수정·삭제다.
+ * 원격에서 여는 도구. 자격 증명 없이 끝까지 가는 것만 남겼다 - 발행과 조회, 수정·삭제다.
+ * 비밀번호가 없는 문서는 누구나 고치고 지울 수 있고, 걸린 문서는 그 비밀번호를 받는다.
  *
  * 뺀 것은 두 부류다. API 키를 요구하는 도구는 원격에 키를 줄 길이 없어 부르면 반드시
  * 실패하고, `filePath` 를 받는 도구는 그 파일이 이 서버가 도는 기계에 없다.
@@ -132,7 +132,7 @@ function textErr(message) {
  * 키가 필요한 도구의 문지기. 키가 없으면 네트워크에 나가지 않고 여기서 알려 준다.
  *
  * 원격에는 키를 건네줄 길 자체가 없다. 그 자리에서 환경변수를 설정하라고 하면 부르는 쪽이
- * 할 수 없는 일을 시키는 것이므로, 대신 발행할 때 받은 제어 토큰을 가리킨다.
+ * 할 수 없는 일을 시키는 것이므로, 대신 키를 넣어 로컬 서버를 띄우는 길을 가리킨다.
  */
 function missingKey(ctx, scopes) {
   if (ctx.key) return null;
