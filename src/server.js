@@ -323,7 +323,7 @@ const TOOL_DEFS = [
           type: "string",
           description:
             "Full Markdown document as one UTF-8 string (the entire source, not a summary). " +
-            "May include graph data in an HTML comment, which the viewer draws beside the text; " +
+            "May include graph data in an HTML comment, which the viewer draws; " +
             "the format is at /docs/graph.",
         },
         title: {
